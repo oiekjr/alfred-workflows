@@ -1,4 +1,4 @@
-// Package githubrepos は GitHub CLI から取得したリポジトリをAlfred向けに変換する。
+// Package githubrepos は GitHub上の対象をAlfred向け候補へ変換する。
 package githubrepos
 
 import (
@@ -12,11 +12,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
 	githubHostname        = "github.com"
 	githubCLIWebsite      = "https://cli.github.com/"
+	githubIssuesURL       = "https://github.com/issues"
+	githubPullRequestsURL = "https://github.com/pulls"
 	minimumGitHubCLI      = "2.60.0"
 	versionTimeout        = 5 * time.Second
 	authenticationTimeout = 5 * time.Second
@@ -27,6 +30,20 @@ const (
 )
 
 var minimumVersion = version{major: 2, minor: 60, patch: 0}
+
+type inputMode int
+
+const (
+	repositoryInput inputMode = iota
+	issuesInput
+	pullRequestsInput
+	projectsInput
+)
+
+type routedInput struct {
+	mode  inputMode
+	query string
+}
 
 // Feed は Alfred Script Filter へ渡す応答を表現する。
 type Feed struct {
@@ -58,7 +75,7 @@ type App struct {
 	loginHelperToken string
 }
 
-// NewApp は GitHubリポジトリを列挙するアプリケーションを初期化する。
+// NewApp は GitHub上の対象を列挙するアプリケーションを初期化する。
 func NewApp(runner CommandRunner) App {
 	loginHelperToken, _ := currentLoginHelperToken()
 
@@ -69,8 +86,24 @@ func NewApp(runner CommandRunner) App {
 	}
 }
 
-// Run は検索語と現在のGitHub CLI の状態に対応するAlfred向け応答を生成する。
+// Run は入力と現在のGitHub CLI の状態に対応するAlfred向け応答を生成する。
 func (app App) Run(ctx context.Context, query string) Feed {
+	input := routeInput(query)
+	switch input.mode {
+	case issuesInput:
+		return fixedLinkFeed(
+			"GitHub Issues",
+			"Open your GitHub issues in the default browser.",
+			githubIssuesURL,
+		)
+	case pullRequestsInput:
+		return fixedLinkFeed(
+			"GitHub Pull requests",
+			"Open your GitHub pull requests in the default browser.",
+			githubPullRequestsURL,
+		)
+	}
+
 	githubCLIPath, err := app.runner.FindExecutable("gh")
 	if err != nil {
 		return installFeed("Install GitHub CLI")
@@ -121,9 +154,25 @@ func (app App) Run(ctx context.Context, query string) Feed {
 		)
 	}
 	if authenticationResult.Err != nil {
+		if input.mode == projectsInput {
+			return projectLoginFeed(app.loginHelperToken)
+		}
+
 		return loginFeed(app.loginHelperToken)
 	}
+	if input.mode == projectsInput {
+		if !hasProjectReadScope(authenticationResult.Stdout) {
+			return projectAuthorizationFeed(app.loginHelperToken)
+		}
 
+		return app.runProjects(ctx, githubCLIPath, input.query)
+	}
+
+	return app.runRepositories(ctx, githubCLIPath, input.query)
+}
+
+// runRepositories は閲覧可能なリポジトリを取得してAlfred向け応答を生成する。
+func (app App) runRepositories(ctx context.Context, githubCLIPath string, query string) Feed {
 	repositoriesResult := app.runner.Run(ctx, Command{
 		Path: githubCLIPath,
 		Args: []string{
@@ -170,6 +219,70 @@ func (app App) Run(ctx context.Context, query string) Feed {
 	items := repositoryItems(matchingRepositories, avatarPaths)
 
 	return Feed{Items: items}
+}
+
+// routeInput は利用者入力を固定リンク、Project検索、リポジトリ検索へ分類する。
+func routeInput(query string) routedInput {
+	normalizedQuery := strings.TrimSpace(query)
+	switch {
+	case strings.EqualFold(normalizedQuery, "issue"),
+		strings.EqualFold(normalizedQuery, "issues"):
+		return routedInput{mode: issuesInput}
+	case strings.EqualFold(normalizedQuery, "pr"),
+		strings.EqualFold(normalizedQuery, "prs"):
+		return routedInput{mode: pullRequestsInput}
+	}
+
+	commandEnd := strings.IndexFunc(normalizedQuery, unicode.IsSpace)
+	command := normalizedQuery
+	projectQuery := ""
+	if commandEnd >= 0 {
+		command = normalizedQuery[:commandEnd]
+		projectQuery = strings.TrimSpace(normalizedQuery[commandEnd:])
+	}
+	if strings.EqualFold(command, "project") || strings.EqualFold(command, "projects") {
+		return routedInput{
+			mode:  projectsInput,
+			query: projectQuery,
+		}
+	}
+
+	return routedInput{
+		mode:  repositoryInput,
+		query: query,
+	}
+}
+
+// fixedLinkFeed はGitHub上の固定ページを開く候補を生成する。
+func fixedLinkFeed(title string, subtitle string, targetURL string) Feed {
+	return Feed{Items: []Item{{
+		Title:        title,
+		Subtitle:     subtitle,
+		Arg:          targetURL,
+		QuickLookURL: targetURL,
+		Valid:        true,
+		Variables:    map[string]string{"action": "open"},
+	}}}
+}
+
+// hasProjectReadScope はGitHub CLI認証にProject読取権限があるか判定する。
+func hasProjectReadScope(output []byte) bool {
+	for _, line := range strings.Split(string(output), "\n") {
+		scopeStart := strings.Index(line, "Token scopes:")
+		if scopeStart < 0 {
+			continue
+		}
+
+		scopeList := line[scopeStart+len("Token scopes:"):]
+		for _, value := range strings.Split(scopeList, ",") {
+			scope := strings.Trim(strings.TrimSpace(value), "'\"")
+			if scope == projectReadScope || scope == projectWriteScope {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // commandFailed はコマンド結果を利用できない状態か判定する。
@@ -277,8 +390,8 @@ func filterRepositories(repositories []repository, query string) ([]repository, 
 }
 
 // repositoryOwners はリポジトリから所有者情報を抽出する。
-func repositoryOwners(repositories []repository) []repositoryOwner {
-	owners := make([]repositoryOwner, 0, len(repositories))
+func repositoryOwners(repositories []repository) []githubOwner {
+	owners := make([]githubOwner, 0, len(repositories))
 	for _, value := range repositories {
 		owners = append(owners, value.Owner)
 	}
@@ -432,18 +545,19 @@ type version struct {
 }
 
 type repository struct {
-	ID          int64           `json:"id"`
-	FullName    string          `json:"full_name"`
-	HTMLURL     string          `json:"html_url"`
-	Private     bool            `json:"private"`
-	Description *string         `json:"description"`
-	Archived    bool            `json:"archived"`
-	Fork        bool            `json:"fork"`
-	Owner       repositoryOwner `json:"owner"`
+	ID          int64       `json:"id"`
+	FullName    string      `json:"full_name"`
+	HTMLURL     string      `json:"html_url"`
+	Private     bool        `json:"private"`
+	Description *string     `json:"description"`
+	Archived    bool        `json:"archived"`
+	Fork        bool        `json:"fork"`
+	Owner       githubOwner `json:"owner"`
 }
 
-type repositoryOwner struct {
-	ID        int64  `json:"id"`
+type githubOwner struct {
+	ID        int64  `json:"id,omitempty"`
+	NodeID    string `json:"node_id,omitempty"`
 	Login     string `json:"login"`
 	AvatarURL string `json:"avatar_url"`
 	Type      string `json:"type"`

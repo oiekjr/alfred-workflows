@@ -32,7 +32,7 @@ const (
 
 // avatarProvider は所有者ごとのローカルアバターパスを提供する。
 type avatarProvider interface {
-	Paths(ctx context.Context, owners []repositoryOwner) map[int64]string
+	Paths(ctx context.Context, owners []githubOwner) map[int64]string
 }
 
 type avatarCache struct {
@@ -85,7 +85,7 @@ func newAvatarHTTPClient() *http.Client {
 }
 
 // Paths はキャッシュ済み画像を返し、必要な画像だけを制限付きで取得する。
-func (cache *avatarCache) Paths(parentContext context.Context, owners []repositoryOwner) map[int64]string {
+func (cache *avatarCache) Paths(parentContext context.Context, owners []githubOwner) map[int64]string {
 	paths := make(map[int64]string)
 	if cache == nil ||
 		cache.client == nil ||
@@ -97,7 +97,7 @@ func (cache *avatarCache) Paths(parentContext context.Context, owners []reposito
 		return paths
 	}
 
-	downloadOwners := make([]repositoryOwner, 0)
+	downloadOwners := make([]githubOwner, 0)
 	seenOwnerIDs := make(map[int64]struct{})
 	for _, owner := range owners {
 		if owner.ID <= 0 {
@@ -131,7 +131,7 @@ func (cache *avatarCache) Paths(parentContext context.Context, owners []reposito
 	ctx, cancel := context.WithTimeout(parentContext, avatarDownloadTimeout)
 	defer cancel()
 
-	jobs := make(chan repositoryOwner, len(downloadOwners))
+	jobs := make(chan githubOwner, len(downloadOwners))
 	for _, owner := range downloadOwners {
 		jobs <- owner
 	}
@@ -180,7 +180,7 @@ func (cache *avatarCache) isFresh(modificationTime time.Time) bool {
 }
 
 // download はアバターを検証し、PNGとしてアトミックに保存する。
-func (cache *avatarCache) download(ctx context.Context, owner repositoryOwner) (string, error) {
+func (cache *avatarCache) download(ctx context.Context, owner githubOwner) (string, error) {
 	avatarURL, err := normalizedAvatarURL(owner.AvatarURL, owner.ID)
 	if err != nil {
 		return "", err
@@ -230,12 +230,12 @@ func (cache *avatarCache) download(ctx context.Context, owner repositoryOwner) (
 // normalizedAvatarURL は許可したGitHub配信先へ画像サイズ指定を追加する。
 func normalizedAvatarURL(rawURL string, ownerID int64) (string, error) {
 	parsedURL, err := url.Parse(rawURL)
-	if err != nil || !isAllowedAvatarURL(parsedURL) {
+	if err != nil {
 		return "", fmt.Errorf("unsupported avatar URL")
 	}
-	avatarOwnerID, err := strconv.ParseInt(strings.TrimPrefix(parsedURL.Path, "/u/"), 10, 64)
+	avatarOwnerID, err := avatarOwnerIDFromURL(parsedURL)
 	if err != nil || avatarOwnerID != ownerID {
-		return "", fmt.Errorf("avatar owner does not match repository owner")
+		return "", fmt.Errorf("avatar owner does not match GitHub owner")
 	}
 
 	query := make(url.Values)
@@ -243,6 +243,20 @@ func normalizedAvatarURL(rawURL string, ownerID int64) (string, error) {
 	parsedURL.RawQuery = query.Encode()
 
 	return parsedURL.String(), nil
+}
+
+// avatarOwnerIDFromURL は許可したGitHubアバターURLから所有者IDを取得する。
+func avatarOwnerIDFromURL(parsedURL *url.URL) (int64, error) {
+	if !isAllowedAvatarURL(parsedURL) {
+		return 0, fmt.Errorf("unsupported avatar URL")
+	}
+
+	ownerID, err := strconv.ParseInt(strings.TrimPrefix(parsedURL.Path, "/u/"), 10, 64)
+	if err != nil || ownerID <= 0 {
+		return 0, fmt.Errorf("unsupported avatar owner")
+	}
+
+	return ownerID, nil
 }
 
 // isAllowedAvatarURL はHTTPSのGitHubアバター配信先だけを許可する。

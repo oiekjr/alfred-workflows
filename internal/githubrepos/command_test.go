@@ -294,3 +294,52 @@ func TestGitHubCLILoginArgumentsAvoidSensitiveSideEffects(t *testing.T) {
 		t.Errorf("login arguments do not constrain authentication: %s", joinedArguments)
 	}
 }
+
+// TestGitHubCLIProjectAuthenticationArgumentsUseReadOnlyScope はProject認証引数を検証する。
+func TestGitHubCLIProjectAuthenticationArgumentsUseReadOnlyScope(t *testing.T) {
+	loginArguments := githubCLIProjectLoginArguments()
+	wantLoginArguments := append(
+		githubCLILoginArguments(),
+		"--scopes",
+		"read:project",
+	)
+	if strings.Join(loginArguments, "\x00") != strings.Join(wantLoginArguments, "\x00") {
+		t.Fatalf("Project login arguments = %#v, want %#v", loginArguments, wantLoginArguments)
+	}
+
+	authorizationArguments := githubCLIProjectAuthorizationArguments()
+	wantAuthorizationArguments := []string{
+		"auth",
+		"refresh",
+		"--hostname",
+		"github.com",
+		"--scopes",
+		"read:project",
+	}
+	if strings.Join(authorizationArguments, "\x00") != strings.Join(wantAuthorizationArguments, "\x00") {
+		t.Fatalf(
+			"Project authorization arguments = %#v, want %#v",
+			authorizationArguments,
+			wantAuthorizationArguments,
+		)
+	}
+
+	for _, arguments := range [][]string{loginArguments, authorizationArguments} {
+		joinedArguments := strings.Join(arguments, " ")
+		for _, forbiddenArgument := range []string{
+			"--clipboard",
+			"--show-token",
+			"--with-token",
+			"--insecure-storage",
+		} {
+			if strings.Contains(joinedArguments, forbiddenArgument) {
+				t.Errorf("Project authentication arguments contain %q: %s", forbiddenArgument, joinedArguments)
+			}
+		}
+		for _, argument := range arguments {
+			if argument == projectWriteScope {
+				t.Errorf("Project authentication requests write scope: %#v", arguments)
+			}
+		}
+	}
+}

@@ -38,15 +38,15 @@ func TestAvatarCacheDownloadsAndReusesImage(t *testing.T) {
 	}
 	cacheDirectory := secureTempDirectory(t)
 	cache := newAvatarCache(cacheDirectory, client)
-	owner := repositoryOwner{
+	owner := githubOwner{
 		ID:        1,
 		Login:     "octocat",
 		AvatarURL: "https://avatars.githubusercontent.com/u/1?v=4",
 		Type:      "User",
 	}
 
-	firstPaths := cache.Paths(context.Background(), []repositoryOwner{owner})
-	secondPaths := cache.Paths(context.Background(), []repositoryOwner{owner})
+	firstPaths := cache.Paths(context.Background(), []githubOwner{owner})
+	secondPaths := cache.Paths(context.Background(), []githubOwner{owner})
 
 	expectedPath := filepath.Join(cacheDirectory, "avatars", "1.png")
 	if firstPaths[owner.ID] != expectedPath || secondPaths[owner.ID] != expectedPath {
@@ -74,14 +74,14 @@ func TestAvatarCacheRejectsUnsupportedHost(t *testing.T) {
 		}),
 	}
 	cache := newAvatarCache(secureTempDirectory(t), client)
-	owner := repositoryOwner{
+	owner := githubOwner{
 		ID:        1,
 		Login:     "octocat",
 		AvatarURL: "https://example.com/avatar.png",
 		Type:      "User",
 	}
 
-	paths := cache.Paths(context.Background(), []repositoryOwner{owner})
+	paths := cache.Paths(context.Background(), []githubOwner{owner})
 
 	if len(paths) != 0 {
 		t.Fatalf("paths = %#v, want empty", paths)
@@ -100,7 +100,7 @@ func TestAvatarCacheUsesStaleImageWhenRefreshFails(t *testing.T) {
 		}),
 	}
 	cache := newAvatarCache(cacheDirectory, client)
-	owner := repositoryOwner{
+	owner := githubOwner{
 		ID:        1,
 		Login:     "octocat",
 		AvatarURL: "https://avatars.githubusercontent.com/u/1?v=4",
@@ -118,7 +118,7 @@ func TestAvatarCacheUsesStaleImageWhenRefreshFails(t *testing.T) {
 		t.Fatalf("expire cached avatar: %v", err)
 	}
 
-	paths := cache.Paths(context.Background(), []repositoryOwner{owner})
+	paths := cache.Paths(context.Background(), []githubOwner{owner})
 
 	if paths[owner.ID] != cachedPath {
 		t.Fatalf("path = %q, want %q", paths[owner.ID], cachedPath)
@@ -140,14 +140,14 @@ func TestAvatarCacheRejectsSymlinkDirectory(t *testing.T) {
 		}),
 	}
 	cache := newAvatarCache(cacheDirectory, client)
-	owner := repositoryOwner{
+	owner := githubOwner{
 		ID:        1,
 		Login:     "octocat",
 		AvatarURL: "https://avatars.githubusercontent.com/u/1?v=4",
 		Type:      "User",
 	}
 
-	paths := cache.Paths(context.Background(), []repositoryOwner{owner})
+	paths := cache.Paths(context.Background(), []githubOwner{owner})
 
 	if len(paths) != 0 {
 		t.Fatalf("paths = %#v, want empty", paths)

@@ -6,7 +6,7 @@
 
 | ワークフロー | キーワード | 概要 |
 | --- | --- | --- |
-| [GitHub Repositories](workflows/github-repositories/README.md) | `gh` | 閲覧可能なGitHubリポジトリを部分一致で検索し、ブラウザで開く |
+| [GitHub Navigator](workflows/github-repositories/README.md) | `gh` | GitHubのリポジトリとProjectを検索し、IssuesとPull requestsを開く |
 
 使い方、追加要件、認証、生成物などの詳細は、各ワークフローの README を参照してください。
 

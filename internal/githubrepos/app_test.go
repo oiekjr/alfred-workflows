@@ -36,6 +36,87 @@ func TestAppRunShowsUpdateItemForOldGitHubCLI(t *testing.T) {
 	assertSingleItem(t, feed, "Update GitHub CLI", true, "open")
 }
 
+// TestAppRunOpensFixedLinksWithoutGitHubCLI は固定リンクがGitHub CLIへ依存しないことを検証する。
+func TestAppRunOpensFixedLinksWithoutGitHubCLI(t *testing.T) {
+	testCases := []struct {
+		name      string
+		query     string
+		wantTitle string
+		wantURL   string
+	}{
+		{
+			name:      "issues singular",
+			query:     " issue ",
+			wantTitle: "GitHub Issues",
+			wantURL:   "https://github.com/issues",
+		},
+		{
+			name:      "issues plural",
+			query:     "ISSUES",
+			wantTitle: "GitHub Issues",
+			wantURL:   "https://github.com/issues",
+		},
+		{
+			name:      "pull requests singular",
+			query:     "Pr",
+			wantTitle: "GitHub Pull requests",
+			wantURL:   "https://github.com/pulls",
+		},
+		{
+			name:      "pull requests plural",
+			query:     "prs",
+			wantTitle: "GitHub Pull requests",
+			wantURL:   "https://github.com/pulls",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := &fakeRunner{findErr: errors.New("GitHub CLI must not be resolved")}
+			app := NewApp(runner)
+
+			feed := app.Run(context.Background(), testCase.query)
+
+			assertSingleItem(t, feed, testCase.wantTitle, true, "open")
+			item := feed.Items[0]
+			if item.Arg != testCase.wantURL || item.QuickLookURL != testCase.wantURL {
+				t.Fatalf("fixed URL item = %#v", item)
+			}
+			if runner.findCalls != 0 || len(runner.commands) != 0 {
+				t.Fatalf("GitHub CLI calls = find %d, commands %d", runner.findCalls, len(runner.commands))
+			}
+		})
+	}
+}
+
+// TestRouteInputClassifiesReservedCommands は予約入力と従来検索の境界を検証する。
+func TestRouteInputClassifiesReservedCommands(t *testing.T) {
+	testCases := []struct {
+		name      string
+		query     string
+		wantMode  inputMode
+		wantQuery string
+	}{
+		{name: "empty repository query", query: "", wantMode: repositoryInput, wantQuery: ""},
+		{name: "issue exact", query: "Issue", wantMode: issuesInput},
+		{name: "issue with text", query: "issue assigned", wantMode: repositoryInput, wantQuery: "issue assigned"},
+		{name: "pull request exact", query: " PRS ", wantMode: pullRequestsInput},
+		{name: "project singular", query: "project", wantMode: projectsInput},
+		{name: "project plural with query", query: "PROJECTS  Road Map ", wantMode: projectsInput, wantQuery: "Road Map"},
+		{name: "project prefix", query: "project-alpha", wantMode: repositoryInput, wantQuery: "project-alpha"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := routeInput(testCase.query)
+
+			if got.mode != testCase.wantMode || got.query != testCase.wantQuery {
+				t.Fatalf("route = %#v, want mode %d and query %q", got, testCase.wantMode, testCase.wantQuery)
+			}
+		})
+	}
+}
+
 // TestAppRunShowsLoginItemWhenAuthenticationFailsは未認証時の導線を検証する。
 func TestAppRunShowsLoginItemWhenAuthenticationFails(t *testing.T) {
 	runner := readyRunner(CommandResult{Err: errors.New("not authenticated")})
@@ -398,21 +479,23 @@ type fakeRunner struct {
 	findErr        error
 	results        []CommandResult
 	commands       []Command
+	findCalls      int
 }
 
 type fakeAvatarProvider struct {
 	paths  map[int64]string
-	owners []repositoryOwner
+	owners []githubOwner
 }
 
 // Paths はテスト用のアバターパスを返す。
-func (provider *fakeAvatarProvider) Paths(_ context.Context, owners []repositoryOwner) map[int64]string {
+func (provider *fakeAvatarProvider) Paths(_ context.Context, owners []githubOwner) map[int64]string {
 	provider.owners = append(provider.owners, owners...)
 	return provider.paths
 }
 
 // FindExecutableはテスト用の実行ファイル検索結果を返す。
 func (runner *fakeRunner) FindExecutable(_ string) (string, error) {
+	runner.findCalls++
 	return runner.executablePath, runner.findErr
 }
 

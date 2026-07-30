@@ -117,6 +117,33 @@ func runBoundedCommand(
 
 // Login はTerminal上で環境を制限したGitHub CLIのWeb認証を実行する。
 func (runner ExecRunner) Login(parentContext context.Context) error {
+	return runner.runInteractiveAuthentication(
+		parentContext,
+		githubCLILoginArguments(),
+	)
+}
+
+// LoginProjects はProject読取権限を含むGitHub CLIのWeb認証を実行する。
+func (runner ExecRunner) LoginProjects(parentContext context.Context) error {
+	return runner.runInteractiveAuthentication(
+		parentContext,
+		githubCLIProjectLoginArguments(),
+	)
+}
+
+// AuthorizeProjects は既存のGitHub CLI認証へProject読取権限を追加する。
+func (runner ExecRunner) AuthorizeProjects(parentContext context.Context) error {
+	return runner.runInteractiveAuthentication(
+		parentContext,
+		githubCLIProjectAuthorizationArguments(),
+	)
+}
+
+// runInteractiveAuthentication は環境を制限してGitHub CLIの対話認証を実行する。
+func (runner ExecRunner) runInteractiveAuthentication(
+	parentContext context.Context,
+	arguments []string,
+) error {
 	githubCLIPath, err := runner.FindExecutable("gh")
 	if err != nil {
 		return err
@@ -129,7 +156,7 @@ func (runner ExecRunner) Login(parentContext context.Context) error {
 	process := exec.CommandContext(
 		parentContext,
 		githubCLIPath,
-		githubCLILoginArguments()...,
+		arguments...,
 	)
 	configureRestrictedProcess(process, environment, false)
 	process.Stdin = os.Stdin
@@ -148,6 +175,27 @@ func githubCLILoginArguments() []string {
 		githubHostname,
 		"--web",
 		"--skip-ssh-key",
+	}
+}
+
+// githubCLIProjectLoginArguments はProject読取権限だけを追加したWeb認証引数を返す。
+func githubCLIProjectLoginArguments() []string {
+	return append(
+		githubCLILoginArguments(),
+		"--scopes",
+		projectReadScope,
+	)
+}
+
+// githubCLIProjectAuthorizationArguments はProject読取権限の追加認証引数を返す。
+func githubCLIProjectAuthorizationArguments() []string {
+	return []string{
+		"auth",
+		"refresh",
+		"--hostname",
+		githubHostname,
+		"--scopes",
+		projectReadScope,
 	}
 }
 
