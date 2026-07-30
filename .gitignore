@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Alfred
+prefs.plist
+*.alfredworkflow
+
+# mise
+mise.local.toml
+
+# ローカルの秘密情報
+.env
+.env.*
+!.env.example

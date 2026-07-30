@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.alfredworkflow binary
+*.gif binary
+*.icns binary
+*.jpeg binary
+*.jpg binary
+*.png binary
