@@ -1,2 +1,27 @@
 [tools]
 go = "1.26.5"
+
+[tasks.format-check]
+description = "Goコードのフォーマットを検査する"
+run = 'test -z "$(gofmt -l .)"'
+
+[tasks.vet]
+description = "Goコードを静的解析する"
+run = "go vet ./..."
+
+[tasks.test]
+description = "Goの単体テストを実行する"
+run = "go test ./..."
+
+[tasks.check]
+description = "すべての検査を実行する"
+depends = ["format-check", "vet", "test"]
+
+[tasks.build]
+description = "macOS Universal Binaryをビルドする"
+run = "./scripts/build.sh"
+
+[tasks.package]
+description = "Alfredワークフローをパッケージ化する"
+depends = ["build"]
+run = "./scripts/package.sh"

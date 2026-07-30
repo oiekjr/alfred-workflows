@@ -5,6 +5,10 @@
 prefs.plist
 *.alfredworkflow
 
+# ビルド
+/build/
+/dist/
+
 # mise
 mise.local.toml
 

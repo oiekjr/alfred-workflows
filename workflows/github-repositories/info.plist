@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleid</key>
+	<string>com.oiekjr.alfred.github-repositories</string>
+	<key>connections</key>
+	<dict>
+		<key>12ADDA7F-0D2D-461E-B28C-C969518ACB45</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>92FB948A-FD02-48DC-88F5-7DB9837579DF</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+			<dict>
+				<key>destinationuid</key>
+				<string>9222169B-4C76-4290-8F2F-91B789BB93A2</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>92FB948A-FD02-48DC-88F5-7DB9837579DF</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>2573976D-093D-493D-9784-C0EC498FBB08</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+		<key>9222169B-4C76-4290-8F2F-91B789BB93A2</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>6CB2F023-FE28-414D-A478-7C8BC3ADCB02</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+	</dict>
+	<key>createdby</key>
+	<string>oiekjr</string>
+	<key>description</key>
+	<string>Search repositories accessible to the active GitHub CLI account.</string>
+	<key>disabled</key>
+	<false/>
+	<key>name</key>
+	<string>GitHub Repositories</string>
+	<key>objects</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<false/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>127</integer>
+				<key>keyword</key>
+				<string>gh</string>
+				<key>queuedelaycustom</key>
+				<integer>1</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<false/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>Loading repositories…</string>
+				<key>script</key>
+				<string>./github-repositories "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>subtext</key>
+				<string>Search repositories accessible to the active GitHub CLI account</string>
+				<key>title</key>
+				<string>Search GitHub repositories</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>12ADDA7F-0D2D-461E-B28C-C969518ACB45</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>inputstring</key>
+				<string>{var:action}</string>
+				<key>matchcasesensitive</key>
+				<true/>
+				<key>matchmode</key>
+				<integer>0</integer>
+				<key>matchstring</key>
+				<string>open</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.utility.filter</string>
+			<key>uid</key>
+			<string>92FB948A-FD02-48DC-88F5-7DB9837579DF</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>browser</key>
+				<string></string>
+				<key>spaces</key>
+				<string></string>
+				<key>url</key>
+				<string></string>
+				<key>utf8</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.openurl</string>
+			<key>uid</key>
+			<string>2573976D-093D-493D-9784-C0EC498FBB08</string>
+			<key>version</key>
+			<integer>0</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>inputstring</key>
+				<string>{var:action}</string>
+				<key>matchcasesensitive</key>
+				<true/>
+				<key>matchmode</key>
+				<integer>0</integer>
+				<key>matchstring</key>
+				<string>login</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.utility.filter</string>
+			<key>uid</key>
+			<string>9222169B-4C76-4290-8F2F-91B789BB93A2</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>escaping</key>
+				<integer>0</integer>
+				<key>script</key>
+				<string>helper_path="$(/usr/bin/printf '%s' '{var:login_helper}' | /usr/bin/base64 -D)" &amp;&amp; "$helper_path" --login</string>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.terminalcommand</string>
+			<key>uid</key>
+			<string>6CB2F023-FE28-414D-A478-7C8BC3ADCB02</string>
+			<key>version</key>
+			<integer>0</integer>
+		</dict>
+	</array>
+	<key>readme</key>
+	<string>Type “gh” followed by part of an owner or repository name.
+
+The workflow lists repositories available to the active GitHub CLI account and opens the selected repository in the default browser.
+
+Repository owner avatars are cached privately in Alfred’s workflow cache and refreshed after seven days.
+
+Requirements:
+• Alfred 5 with Powerpack
+• GitHub CLI 2.60.0 or later
+• An authenticated GitHub.com account
+
+If authentication is required, select “Sign in to GitHub”, complete the GitHub CLI login in Terminal, and enter “gh” in Alfred again.</string>
+	<key>uidata</key>
+	<dict>
+		<key>12ADDA7F-0D2D-461E-B28C-C969518ACB45</key>
+		<dict>
+			<key>xpos</key>
+			<integer>50</integer>
+			<key>ypos</key>
+			<integer>140</integer>
+		</dict>
+		<key>92FB948A-FD02-48DC-88F5-7DB9837579DF</key>
+		<dict>
+			<key>xpos</key>
+			<integer>310</integer>
+			<key>ypos</key>
+			<integer>60</integer>
+		</dict>
+		<key>2573976D-093D-493D-9784-C0EC498FBB08</key>
+		<dict>
+			<key>xpos</key>
+			<integer>550</integer>
+			<key>ypos</key>
+			<integer>60</integer>
+		</dict>
+		<key>9222169B-4C76-4290-8F2F-91B789BB93A2</key>
+		<dict>
+			<key>xpos</key>
+			<integer>310</integer>
+			<key>ypos</key>
+			<integer>220</integer>
+		</dict>
+		<key>6CB2F023-FE28-414D-A478-7C8BC3ADCB02</key>
+		<dict>
+			<key>xpos</key>
+			<integer>550</integer>
+			<key>ypos</key>
+			<integer>220</integer>
+		</dict>
+	</dict>
+	<key>userconfigurationconfig</key>
+	<array/>
+	<key>variablesdontexport</key>
+	<array/>
+	<key>version</key>
+	<string>0.1.0</string>
+	<key>webaddress</key>
+	<string>https://github.com/oiekjr/alfred-workflows</string>
+</dict>
+</plist>
