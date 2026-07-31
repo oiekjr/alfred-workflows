@@ -51,6 +51,8 @@ Run all formatting, static analysis, and unit-test checks from the repository ro
 mise run check
 ```
 
+GitHub Actions runs the same task for pull requests and pushes to `main`.
+
 ## Build a workflow
 
 Build the current workflow executable as a macOS Universal Binary:
@@ -93,13 +95,30 @@ When adding or changing a workflow:
 5. Pin any approved language or toolchain version with mise.
 6. Do not commit Alfred's personal `prefs.plist`, API keys or other secrets, or user-specific absolute paths.
 
-## Prepare a release
+## Publish GitHub Navigator
 
-Version and publish each workflow independently, and attach its `.alfredworkflow` artifact to GitHub Releases.
+Version and publish each workflow independently. The release workflow publishes GitHub Navigator from a versioned tag.
 
-Executables intended for workflow users must be Universal Binaries and must not require a language runtime or mise on the user's Mac.
+1. Update `version` in `workflows/github-repositories/info.plist`.
+2. Validate and package the workflow locally:
 
-The generated SHA-256 checksum and ad hoc code signature help detect corruption or unintended replacement, but they do not authenticate the publisher. Configure authenticated signing or equivalent signed provenance before relying on the release channel for publisher identity.
+   ```sh
+   mise run check
+   mise run package
+   ```
+
+3. Commit the release-ready changes.
+4. Create and push a tag whose version matches `info.plist`:
+
+   ```sh
+   version=0.2.3
+   git tag "github-repositories-v${version}"
+   git push origin "github-repositories-v${version}"
+   ```
+
+Pushing the tag starts the release workflow. A successful run immediately publishes a GitHub Release containing the `.alfredworkflow` artifact and its SHA-256 checksum, and associates a GitHub artifact attestation with the packaged workflow.
+
+The workflow rejects tags that do not use `github-repositories-vMAJOR.MINOR.PATCH` or do not match the workflow version. Executables intended for workflow users remain Universal Binaries and do not require a language runtime or mise on the user's Mac.
 
 ## Report a security issue
 

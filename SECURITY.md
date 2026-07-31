@@ -18,12 +18,13 @@ A malicious process running as the same macOS user can modify the workflow, GitH
 - Avatar refresh runs asynchronously with a verified executable and fixed arguments. It does not inherit secrets from the parent process.
 - Avatar files are downloaded directly from approved GitHub HTTPS hosts and stored in private directories and files with `0700` and `0600` permissions.
 - Build and packaging tasks validate the pinned mise installation, ancestor symbolic links, ownership, shared-write permissions, versions, artifact contents, binary architectures, code signatures, and checksums.
+- GitHub Actions dependencies are pinned to full commit hashes. The release workflow validates the tag against `info.plist` and separates read-only repository access plus attestation-specific permissions from the release job's `contents: write` permission.
 
 ## Artifact assurance
 
-The generated SHA-256 checksum and ad hoc code signature help detect corruption or unintended replacement. They do not prove the publisher's identity.
+The generated SHA-256 checksum and ad hoc code signature help detect corruption or unintended replacement. The release workflow also generates a GitHub artifact attestation that binds the packaged workflow to its source repository, tagged commit, and workflow run.
 
-Public releases require authenticated signing or equivalent signed provenance when publisher identity must be verified.
+The attestation provides signed build provenance but does not replace Apple Developer ID signing or notarization. The ad hoc code signature alone does not prove the publisher's identity.
 
 ## Report a vulnerability
 

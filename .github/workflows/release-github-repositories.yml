@@ -1,0 +1,143 @@
+name: Release GitHub Navigator
+
+on:
+  push:
+    tags:
+      - github-repositories-v*
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and attest
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    outputs:
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up mise
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
+        with:
+          version: 2026.7.17
+          cache: true
+
+      - name: Validate release version
+        id: version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TAG_NAME" =~ ^github-repositories-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "Release tag must use github-repositories-vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          fi
+
+          version="${BASH_REMATCH[1]}"
+          plist_version="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :version" \
+              workflows/github-repositories/info.plist
+          )"
+          if [[ "$version" != "$plist_version" ]]; then
+            echo "Release tag version does not match info.plist." >&2
+            exit 1
+          fi
+
+          printf 'tag_name=%s\n' "$TAG_NAME" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Run checks
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: mise run check
+
+      - name: Package workflow
+        run: mise run package
+
+      - name: Attest workflow artifact
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: dist/github-repositories-${{ steps.version.outputs.version }}.alfredworkflow
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: github-repositories-release-${{ steps.version.outputs.version }}
+          path: |
+            dist/github-repositories-${{ steps.version.outputs.version }}.alfredworkflow
+            dist/github-repositories-${{ steps.version.outputs.version }}.alfredworkflow.sha256
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: github-repositories-release-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Verify release assets
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact="github-repositories-${VERSION}.alfredworkflow"
+          checksum="${artifact}.sha256"
+
+          cd dist
+          if [[ -L "$artifact" || ! -f "$artifact" || -L "$checksum" || ! -f "$checksum" ]]; then
+            echo "Release assets are missing or unsafe." >&2
+            exit 1
+          fi
+          sha256sum --check "$checksum"
+
+      - name: Publish GitHub Release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.build.outputs.tag_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact="dist/github-repositories-${VERSION}.alfredworkflow"
+          checksum="${artifact}.sha256"
+
+          gh release create \
+            "$TAG_NAME" \
+            "$artifact" \
+            "$checksum" \
+            --generate-notes \
+            --title "GitHub Navigator v${VERSION}" \
+            --verify-tag
