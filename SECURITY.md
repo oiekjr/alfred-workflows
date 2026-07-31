@@ -1,24 +1,39 @@
-# セキュリティ
+# Security Policy
 
-## 信頼境界
+## Trust model
 
-このワークフローは、正規の配布元から取得したワークフロー、利用者本人が導入したGitHub CLI、利用者本人のmacOSアカウントを信頼します。同じmacOSユーザー権限で動作する悪意あるプロセスは、ワークフロー、GitHub CLI、Keychain、Alfredの設定を変更できるため、このワークフロー単体では防御対象にできません。
+This repository trusts a workflow obtained from its legitimate distribution channel, a GitHub CLI installation chosen by the user, and the user's macOS account.
 
-## 実装上の対策
+A malicious process running as the same macOS user can modify the workflow, GitHub CLI, Keychain data, or Alfred settings. Defending against a process that already has those privileges is outside the workflow's security boundary.
 
-- `gh` は固定した標準配置だけから検索し、`O_NOFOLLOW`で開いた実体の所有者と権限を検証してから、他アカウントが変更できない専用キャッシュへ複製する
-- `gh` の実行時は親環境を破棄し、`HOME`、`PATH`、pager、browserなど必要な値だけを設定する
-- Terminalの認証導線には相対パスを使わず、実行中バイナリの検証済み絶対パスをBase64で安全に受け渡す
-- Project連携では`read:project`だけを追加要求し、Projectの書込権限を要求しない
-- 認証とAPI取得に成功したリポジトリ一覧およびProject一覧だけを、他アカウントが読めない専用キャッシュで60秒間だけ再利用し、期限切れは次回参照時に削除する
-- 一覧キャッシュにはアクセストークン、検索文字列、CLI標準エラーを保存せず、期限切れ、形式不一致、認証操作時に無効化する
-- URL、JSON、画像形式、画像寸法、応答容量、実行時間、標準出力量を検証または制限する
-- アバター更新は検証済み実行ファイルと固定引数だけを使用する非同期処理へ分離し、親プロセスの秘密情報を引き継がない
-- アバターはGitHubのHTTPSホストから直接取得し、専用キャッシュへ`0700`／`0600`で保存する
-- ビルドとパッケージ作成では、固定したmise導入先、祖先を含むsymlink、所有者、共有書込権限、バージョン、内容、アーキテクチャ、コード署名、チェックサムを検証する
+## Security controls
 
-SHA-256チェックサムとad-hocコード署名は、破損や意図しない差替えの検出を補助しますが、配布者の本人性は証明しません。公開リリースには、別途、認証済み署名または署名付きprovenanceが必要です。
+- The workflow searches only fixed, standard locations for `gh`. It opens the executable with `O_NOFOLLOW`, verifies ownership and permissions, and copies the verified executable into a private cache that other accounts cannot modify.
+- GitHub CLI runs without the parent environment. Only required values such as `HOME`, `PATH`, pager settings, and browser settings are set explicitly.
+- Terminal authentication actions use a verified absolute helper path instead of a relative path. The path is Base64-encoded for safe transport to the fixed Terminal command.
+- Projects integration requests only `read:project` and does not request Projects write access.
+- Repository and Project lists are cached for 60 seconds only after authentication and API retrieval succeed. Cache files are private, and expired files are removed on the next read.
+- List caches never store access tokens, Alfred search text, or GitHub CLI standard error output. They are invalidated after expiry, an invalid format, or a workflow authentication action.
+- URLs, JSON, image formats, image dimensions, response sizes, command output sizes, and execution times are validated or bounded.
+- Avatar refresh runs asynchronously with a verified executable and fixed arguments. It does not inherit secrets from the parent process.
+- Avatar files are downloaded directly from approved GitHub HTTPS hosts and stored in private directories and files with `0700` and `0600` permissions.
+- Build and packaging tasks validate the pinned mise installation, ancestor symbolic links, ownership, shared-write permissions, versions, artifact contents, binary architectures, code signatures, and checksums.
 
-## 脆弱性の報告
+## Artifact assurance
 
-認証情報、プライベートリポジトリ情報、任意コマンド実行に関係する問題は公開Issueへ秘密情報を貼らず、リポジトリのPrivate vulnerability reportingから報告してください。報告には再現条件、影響範囲、秘密情報を除いた最小の再現手順を含めてください。
+The generated SHA-256 checksum and ad hoc code signature help detect corruption or unintended replacement. They do not prove the publisher's identity.
+
+Public releases require authenticated signing or equivalent signed provenance when publisher identity must be verified.
+
+## Report a vulnerability
+
+Do not include credentials, private repository information, or exploit secrets in a public issue.
+
+To report a vulnerability:
+
+1. Open [GitHub Private vulnerability reporting](https://github.com/oiekjr/alfred-workflows/security/advisories/new).
+2. Describe the conditions required to reproduce the issue.
+3. Explain the affected scope and expected impact.
+4. Include the smallest useful reproduction steps with all secrets removed.
+
+Use private reporting for issues involving authentication data, private repository information, or arbitrary command execution.

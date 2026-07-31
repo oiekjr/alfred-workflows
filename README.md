@@ -1,74 +1,110 @@
 # Alfred Workflows
 
-[Alfred 5](https://www.alfredapp.com/) 向けの複数のワークフローを、1つのリポジトリで実装・管理します。
+Use this repository to install, build, and maintain independent workflows for [Alfred 5](https://www.alfredapp.com/).
 
-## ワークフロー一覧
+## Choose a workflow
 
-| ワークフロー | キーワード | 概要 |
+| Workflow | Keyword | What it does |
 | --- | --- | --- |
-| [GitHub Navigator](workflows/github-repositories/README.md) | `gh` | GitHubのリポジトリとProjectを検索し、IssuesとPull requestsを開く |
+| [GitHub Navigator](workflows/github-repositories/README.md) | `gh` | Finds accessible GitHub repositories and Projects, and opens personal Issues and Pull requests pages |
 
-使い方、追加要件、認証、生成物などの詳細は、各ワークフローの README を参照してください。
+Open the workflow-specific README for its usage, authentication, and additional requirements.
 
-## 共通要件
+## Install a workflow
 
-- macOS 13以降
+Before installing a workflow, make sure you have:
+
+- macOS 13 or later
 - Alfred 5
 - Alfred Powerpack
 
-ワークフロー固有のCLIやサービスは、各ワークフローの追加要件として管理します。
+Then install the workflow:
 
-## インストール
+1. Open the repository's [GitHub Releases](https://github.com/oiekjr/alfred-workflows/releases).
+2. Download the `.alfredworkflow` file for the workflow you want.
+3. Double-click the downloaded file.
+4. Review and confirm the import in Alfred.
+5. Follow the workflow-specific README to complete any authentication or tool setup.
 
-GitHub Releases から目的のワークフローの `.alfredworkflow` をダウンロードし、ダブルクリックして Alfred へ読み込みます。各ワークフローは独立した配布物として提供します。
+Each workflow is distributed as an independent artifact.
 
-## リポジトリ構成
+## Set up the development environment
 
-```text
-cmd/          ワークフローに同梱する実行ファイル
-internal/     ワークフローごとの内部実装
-scripts/      共通またはワークフロー固有の開発スクリプト
-workflows/    Alfred定義とワークフロー別README
-```
+Language and tool versions are managed with [mise](https://mise.jdx.dev/).
 
-ワークフローの識別子には一貫した短い名前を使用し、関連する実装、Alfred定義、配布物の対応関係を明確にします。
+1. Install mise.
+2. From the repository root, install the pinned tools:
 
-## 開発環境
+   ```sh
+   mise install
+   ```
 
-言語とツールのバージョンは [mise](https://mise.jdx.dev/) で管理します。
+3. Put developer-specific overrides in `mise.local.toml`. This file is excluded from Git.
 
-```sh
-mise install
-```
+The current repository uses Go to build self-contained executables, so workflow users do not need Go or mise.
 
-開発者固有の設定には、Git の管理対象外である `mise.local.toml` を使用します。現在、リポジトリルートから次のタスクを実行できます。
+## Validate changes
+
+Run all formatting, static analysis, and unit-test checks from the repository root:
 
 ```sh
 mise run check
+```
+
+## Build a workflow
+
+Build the current workflow executable as a macOS Universal Binary:
+
+```sh
 mise run build
+```
+
+The current build task writes:
+
+```text
+build/github-repositories
+```
+
+## Package a workflow
+
+Create an installable Alfred artifact and its checksum:
+
+```sh
 mise run package
 ```
 
-タスクの対象や生成物は、各ワークフローの README に記載します。新しい言語やツールチェーンを追加する場合も、バージョンは mise で固定します。
+The current package task writes:
 
-## 管理方針
+```text
+dist/github-repositories-<version>.alfredworkflow
+dist/github-repositories-<version>.alfredworkflow.sha256
+```
 
-- ワークフローごとにAlfred定義、実装、ドキュメント、配布物を分離する
-- Alfredの個人設定を保存する `prefs.plist` はコミットしない
-- APIキーなどの秘密情報をワークフローやリポジトリへ保存しない
-- 共有するワークフローでは、利用者固有の絶対パスを埋め込まない
-- ワークフロー固有の要件や制約は、該当ディレクトリの README へ記載する
+The package task validates the workflow property list, binary architectures, ad hoc code signature, ZIP contents, and SHA-256 checksum.
 
-## セキュリティ
+## Add or maintain a workflow
 
-リポジトリ共通の信頼境界、実装方針、脆弱性の報告方法は [SECURITY.md](SECURITY.md) を参照してください。
+When adding or changing a workflow:
 
-## 配布
+1. Give it a short, stable identifier.
+2. Keep its executable entry point under `cmd/`, internal implementation under `internal/`, Alfred definition under `workflows/`, and development automation under `scripts/`.
+3. Keep each workflow's definition, implementation, documentation, version, and artifact independent from other workflows.
+4. Document workflow-specific requirements and constraints in that workflow's README.
+5. Pin any approved language or toolchain version with mise.
+6. Do not commit Alfred's personal `prefs.plist`, API keys or other secrets, or user-specific absolute paths.
 
-配布物はワークフロー単位でバージョン管理し、GitHub Releases へ添付します。実行ファイルを必要とするワークフローでは Universal Binary を同梱し、利用者側の言語ランタイムや mise への依存を避けます。
+## Prepare a release
 
-開発用パッケージにはSHA-256チェックサムを生成します。ただし、チェックサムやad-hocコード署名だけでは配布者の本人性を証明できません。公開リリースまでに、認証済み署名または同等の署名付きprovenanceを配布経路へ設定します。
+Version and publish each workflow independently, and attach its `.alfredworkflow` artifact to GitHub Releases.
 
-## ライセンス
+Executables intended for workflow users must be Universal Binaries and must not require a language runtime or mise on the user's Mac.
+
+The generated SHA-256 checksum and ad hoc code signature help detect corruption or unintended replacement, but they do not authenticate the publisher. Configure authenticated signing or equivalent signed provenance before relying on the release channel for publisher identity.
+
+## Report a security issue
+
+Read [SECURITY.md](SECURITY.md) before reporting a vulnerability. Do not put credentials, private repository details, or exploit secrets in a public issue.
+
+## License
 
 [MIT License](LICENSE)

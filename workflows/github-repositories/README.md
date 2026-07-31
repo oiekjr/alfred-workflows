@@ -1,73 +1,124 @@
 # GitHub Navigator
 
-GitHub CLI のアクティブなアカウントを使い、GitHubのリポジトリとProjectをAlfredから検索するワークフローです。IssuesとPull requestsの個人向け一覧も直接開けます。
+Use GitHub Navigator to find repositories and Projects available to the active GitHub CLI account from Alfred. You can also open your personal GitHub Issues and Pull requests pages.
 
-## 使い方
+## Check the requirements
 
-Alfredで`gh`に続けて入力します。
+Before installing GitHub Navigator, make sure you have:
 
-| 入力 | 動作 |
-| --- | --- |
-| `gh` | 閲覧可能なリポジトリを一覧表示する |
-| `gh <テキスト>` | 所有者名またはリポジトリ名を部分一致で絞り込む |
-| `gh issue` / `gh issues` | [GitHub Issues](https://github.com/issues)を開く |
-| `gh pr` / `gh prs` | [GitHub Pull requests](https://github.com/pulls)を開く |
-| `gh project` / `gh projects` | 閲覧可能なOpen Projectを一覧表示する |
-| `gh project <テキスト>` / `gh projects <テキスト>` | 所有者名またはProject名を部分一致で絞り込む |
-
-検索は1文字から開始し、大文字小文字を区別せず、文字列の任意の位置に一致します。`gh`入力時の初回取得は即時に開始し、続く入力は最後の文字から300ms後に反映します。IssuesとPull requestsの入力は完全一致の場合だけ固定リンクとして扱います。
-
-## 検索対象
-
-リポジトリ検索には、次のリポジトリが含まれます。
-
-- 自分が所有するリポジトリ
-- 共同作業者として参加しているリポジトリ
-- 所属Organizationを通じて閲覧できるリポジトリ
-
-Project検索には、自分または所属Organizationが所有し、アクティブなアカウントが閲覧できるOpen Projectが含まれます。取得件数は所有者ごとに最大100件です。Closed Project、GitHub全体のリポジトリ、スター済みリポジトリは検索しません。
-
-## 要件
-
-- macOS 13以降
+- macOS 13 or later
 - Alfred 5
 - Alfred Powerpack
-- [GitHub CLI](https://cli.github.com/) 2.60.0以降
+- [GitHub CLI](https://cli.github.com/) 2.60.0 or later
 
-GitHub CLI はHomebrewまたはMacPortsの標準配置にインストールしてください。IssuesとPull requestsの固定リンクだけは、GitHub CLIが未導入または未認証でも利用できます。
+Install GitHub CLI in a standard Homebrew or MacPorts location. The fixed Issues and Pull requests links work even when GitHub CLI is missing or not authenticated.
 
-## 認証
+## Install the workflow
 
-一覧キャッシュがない場合または期限切れの場合、ワークフローは`gh auth status`でGitHub.comのアクティブなアカウントを確認します。未認証の場合は表示された`Sign in to GitHub`を選択し、TerminalでGitHub CLIのWeb認証を完了してください。認証コードのクリップボード書込やSSH鍵の生成・アップロードは行いません。
+1. Open the repository's [GitHub Releases](https://github.com/oiekjr/alfred-workflows/releases).
+2. Download `github-repositories-<version>.alfredworkflow`.
+3. Double-click the downloaded file.
+4. Review and confirm the import in Alfred.
 
-Project検索には、GitHub CLI OAuth Appの`read:project`スコープが必要です。
+## Authenticate with GitHub
 
-- 未認証の場合は`Sign in to GitHub for Projects`から、Project読取権限を含むWeb認証を開始する
-- 認証済みで権限が不足する場合は`Authorize GitHub Projects`から、既存認証へ`read:project`だけを追加する
+Repository search uses the active GitHub.com account configured by GitHub CLI.
 
-Projectの書込権限は要求しません。Organizationの設定によっては、GitHub CLI OAuth Appの承認やSAML SSO認証が別途必要です。
+1. Type `gh` in Alfred.
+2. If Alfred displays `Sign in to GitHub`, select it.
+3. Complete GitHub CLI's web authentication flow in Terminal.
+4. Return to Alfred and retry the same input.
 
-環境変数だけで認証している構成や独自の`GH_CONFIG_DIR`には対応せず、標準の`gh auth login`による認証が必要です。
+The workflow does not copy an authentication code to the clipboard or generate or upload an SSH key.
 
-## データの取扱い
+GitHub Projects require the `read:project` OAuth scope:
 
-リポジトリ一覧とProject一覧は認証状態を確認した後に`gh api`で取得し、検証・正規化した必要最小限の項目だけをAlfredのワークフロー専用キャッシュで60秒間再利用します。キャッシュは他のmacOSアカウントがアクセスできない権限で保存し、期限切れは次回参照時に削除します。形式不一致やワークフローからの認証操作でも無効化します。
+- If you are signed out, select `Sign in to GitHub for Projects` to start web authentication with read-only Projects access.
+- If you are already signed in without the required scope, select `Authorize GitHub Projects` to add only `read:project` to the existing authentication.
 
-キャッシュが有効な間は`gh`を起動せず、入力された検索文字列をGo で照合します。外部で`gh auth logout`や`gh auth switch`を実行した場合は、最大60秒間、直前のアカウントの結果が表示される可能性があります。
+The workflow does not request the `project` write scope. Depending on the Organization's policy, you may also need to approve the GitHub CLI OAuth App or authorize it for SAML SSO.
 
-アクセストークン、検索文字列、GitHub APIのエラー内容、GitHub CLIの標準エラーはキャッシュへ保存せず、直接表示もしません。
+Authentication provided only through environment variables is not supported. A custom `GH_CONFIG_DIR` is also unsupported; use the standard `gh auth login` configuration.
 
-Project一覧は固定したGraphQLクエリで取得します。Alfredへ入力した検索テキストはGitHub APIへ送信せず、取得後にワークフロー内で照合します。GitHubから返された遷移先も検証し、GitHub.com上の対象リポジトリまたはProject URLだけを開きます。
+## Find a repository
 
-GitHub CLIは配置先と実体を検証し、Alfredの非公開キャッシュへ安全に複製した実行ファイルを使用します。親プロセスのトークン、プロキシ、ブラウザ、`PATH`などの環境変数は引き継ぎません。
+1. Type `gh` to list repositories visible to the active account.
+2. Add one or more characters to filter by owner or repository name.
+3. Select a result to open its GitHub page in the default browser.
 
-所有者のアバターは検索結果の表示を待たせないバックグラウンド処理でGitHubのHTTPSホストから直接取得し、当該ワークフロー専用キャッシュへ非公開権限で保存します。バックグラウンド処理には検索文字列やAPI応答を引数で渡しません。画像は7日後に更新し、未取得または取得できない場合も検索結果は通常どおり表示します。
+Matching is case-insensitive and checks every position in the full `owner/repository` name. Filtering starts with the first character. The initial `gh` request starts immediately, while subsequent input is applied 300 milliseconds after the last character.
 
-リポジトリ共通のセキュリティ方針は[SECURITY.md](../../SECURITY.md)を参照してください。
+Repository results include repositories that:
 
-## 開発
+- You own
+- You can access as a collaborator
+- You can access through Organization membership
 
-検査、Universal Binaryのビルド、パッケージ作成はリポジトリルートで実行します。
+The workflow does not search every public repository on GitHub or use your starred repositories as a separate result source.
+
+## Open Issues or Pull requests
+
+Use an exact command to open GitHub's personal activity page:
+
+| Input | Destination |
+| --- | --- |
+| `gh issue` or `gh issues` | [GitHub Issues](https://github.com/issues) |
+| `gh pr` or `gh prs` | [GitHub Pull requests](https://github.com/pulls) |
+
+These exact commands do not launch GitHub CLI or call an API. Inputs such as `gh issue example` continue through repository search instead of opening the fixed page.
+
+## Find a Project
+
+1. Type `gh project` or `gh projects` to list accessible open Projects.
+2. Add one or more characters to filter by owner or Project title.
+3. Select a result to open its GitHub Project page.
+
+Examples:
+
+```text
+gh project roadmap
+gh projects example-org
+```
+
+Project results include open Projects owned by you or by an Organization you belong to when the active account has at least read access. Each owner is limited to 100 Projects. Closed Projects are excluded.
+
+Organization Projects use the Organization avatar, and personal Projects use the user avatar.
+
+## Troubleshoot the workflow
+
+If the workflow reports that GitHub CLI is missing or outdated:
+
+1. Install GitHub CLI 2.60.0 or later with Homebrew or MacPorts.
+2. Confirm that it is in the standard installation location.
+3. Retry the Alfred input.
+
+If repository search asks you to sign in, complete the `Sign in to GitHub` action. If Project search asks for additional access, use the Project-specific sign-in or authorization action.
+
+If you run `gh auth logout` or `gh auth switch` outside the workflow, results from the previous active account can remain visible for up to 60 seconds. Retry after the short-lived list cache expires.
+
+Missing or unavailable avatars do not prevent repository or Project results from appearing.
+
+## Review data handling
+
+After authentication succeeds, the workflow retrieves repository and Project lists with `gh api`. It validates and normalizes the minimum required fields, then stores them in Alfred's private workflow cache for 60 seconds. Expired cache files are removed the next time they are read. Authentication actions and invalid cache formats also invalidate the list cache.
+
+While the list cache is valid, the workflow does not launch `gh`; it filters the cached data locally in Go. The search text entered in Alfred is not stored in the cache.
+
+Projects are retrieved with a fixed GraphQL query. Search text is never added to that query and is matched locally after retrieval.
+
+Access tokens, search text, GitHub API error details, and GitHub CLI standard error output are neither cached nor displayed in Alfred.
+
+Repository and Project destination URLs are validated before they become selectable. Only the expected GitHub.com repository and Project URL forms are accepted.
+
+The workflow validates the GitHub CLI installation and copies the trusted executable into Alfred's private cache before use. GitHub CLI runs with a restricted environment that does not inherit parent-process tokens, proxy settings, browser settings, or `PATH`.
+
+Owner avatars are refreshed in a background process so image downloads do not delay search results. Images are downloaded directly from approved GitHub HTTPS hosts, stored with private permissions, and refreshed after seven days. Search text and API responses are not passed as background-process arguments.
+
+See the repository-wide [security policy](../../SECURITY.md) for trust boundaries and vulnerability reporting.
+
+## Develop and package the workflow
+
+Run validation, Universal Binary builds, and packaging from the repository root:
 
 ```sh
 mise run check
@@ -75,7 +126,7 @@ mise run build
 mise run package
 ```
 
-生成物は次のとおりです。互換性のため、配布物名はGitHub Navigatorへの改称後も維持します。
+The tasks write:
 
 ```text
 build/github-repositories
@@ -83,4 +134,6 @@ dist/github-repositories-<version>.alfredworkflow
 dist/github-repositories-<version>.alfredworkflow.sha256
 ```
 
-ビルド時のネットワークアクセスと親プロセスの言語設定は無効化されます。開発用実行ファイルにはad-hocコード署名を行い、配布物のZIP内容、アーキテクチャ、署名、SHA-256チェックサムをパッケージ作成時に検証します。
+The artifact name remains `github-repositories` for compatibility, even though the Alfred display name is GitHub Navigator.
+
+Builds disable network access and ignore the parent process's language settings. Packaging validates the ZIP contents, binary architectures, ad hoc code signature, and SHA-256 checksum.
