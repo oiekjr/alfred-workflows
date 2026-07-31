@@ -16,17 +16,18 @@ import (
 )
 
 const (
-	githubHostname        = "github.com"
-	githubCLIWebsite      = "https://cli.github.com/"
-	githubIssuesURL       = "https://github.com/issues"
-	githubPullRequestsURL = "https://github.com/pulls"
-	minimumGitHubCLI      = "2.60.0"
-	versionTimeout        = 5 * time.Second
-	authenticationTimeout = 5 * time.Second
-	apiTimeout            = 30 * time.Second
-	shortOutputLimit      = 4 * 1024
-	apiOutputLimit        = 16 * 1024 * 1024
-	stderrLimit           = 8 * 1024
+	githubHostname             = "github.com"
+	githubCLIWebsite           = "https://cli.github.com/"
+	githubIssuesURL            = "https://github.com/issues"
+	githubPullRequestsURL      = "https://github.com/pulls"
+	minimumGitHubCLI           = "2.60.0"
+	versionTimeout             = 5 * time.Second
+	authenticationTimeout      = 5 * time.Second
+	apiTimeout                 = 30 * time.Second
+	shortOutputLimit           = 4 * 1024
+	apiOutputLimit             = 16 * 1024 * 1024
+	stderrLimit                = 8 * 1024
+	repositoryDescriptionLimit = 4 * 1024
 )
 
 var minimumVersion = version{major: 2, minor: 60, patch: 0}
@@ -48,6 +49,13 @@ type routedInput struct {
 // Feed は Alfred Script Filter へ渡す応答を表現する。
 type Feed struct {
 	Items []Item `json:"items"`
+
+	avatarRefreshNeeded bool
+}
+
+// NeedsAvatarRefresh は不足または期限切れのアバターがあるか返す。
+func (feed Feed) NeedsAvatarRefresh() bool {
+	return feed.avatarRefreshNeeded
 }
 
 // Item は Alfred に表示する1件の候補を表現する。
@@ -70,19 +78,17 @@ type Icon struct {
 
 // App は GitHub CLI との連携処理を提供する。
 type App struct {
-	runner           CommandRunner
-	avatars          avatarProvider
-	loginHelperToken string
+	runner  CommandRunner
+	avatars avatarProvider
+	lists   listCacheProvider
 }
 
 // NewApp は GitHub上の対象を列挙するアプリケーションを初期化する。
 func NewApp(runner CommandRunner) App {
-	loginHelperToken, _ := currentLoginHelperToken()
-
 	return App{
-		runner:           runner,
-		avatars:          newEnvironmentAvatarCache(),
-		loginHelperToken: loginHelperToken,
+		runner:  runner,
+		avatars: newEnvironmentAvatarCache(),
+		lists:   newEnvironmentListCache(),
 	}
 }
 
@@ -102,6 +108,18 @@ func (app App) Run(ctx context.Context, query string) Feed {
 			"Open your GitHub pull requests in the default browser.",
 			githubPullRequestsURL,
 		)
+	}
+
+	if input.mode == projectsInput {
+		if app.lists != nil {
+			if projects, ok := app.lists.LoadProjects(); ok {
+				return app.projectFeed(projects, input.query, true)
+			}
+		}
+	} else if app.lists != nil {
+		if repositories, ok := app.lists.LoadRepositories(); ok {
+			return app.repositoryFeed(repositories, input.query, true)
+		}
 	}
 
 	githubCLIPath, err := app.runner.FindExecutable("gh")
@@ -155,20 +173,26 @@ func (app App) Run(ctx context.Context, query string) Feed {
 	}
 	if authenticationResult.Err != nil {
 		if input.mode == projectsInput {
-			return projectLoginFeed(app.loginHelperToken)
+			return projectLoginFeed(loginHelperToken())
 		}
 
-		return loginFeed(app.loginHelperToken)
+		return loginFeed(loginHelperToken())
 	}
 	if input.mode == projectsInput {
 		if !hasProjectReadScope(authenticationResult.Stdout) {
-			return projectAuthorizationFeed(app.loginHelperToken)
+			return projectAuthorizationFeed(loginHelperToken())
 		}
 
 		return app.runProjects(ctx, githubCLIPath, input.query)
 	}
 
 	return app.runRepositories(ctx, githubCLIPath, input.query)
+}
+
+// loginHelperToken は認証導線が必要になった時だけ実行ファイルを検証する。
+func loginHelperToken() string {
+	token, _ := currentLoginHelperToken()
+	return token
 }
 
 // runRepositories は閲覧可能なリポジトリを取得してAlfred向け応答を生成する。
@@ -199,26 +223,48 @@ func (app App) runRepositories(ctx context.Context, githubCLIPath string, query 
 	if err != nil {
 		return repositoryFailureFeed(false)
 	}
+
+	normalizedRepositories, validRepositoryCount := normalizeRepositories(repositories)
+	if len(repositories) > 0 && validRepositoryCount == 0 {
+		return repositoryFailureFeed(false)
+	}
+	cacheAvailable := false
+	if app.lists != nil {
+		cacheAvailable = app.lists.StoreRepositories(normalizedRepositories) == nil
+	}
+
+	return app.repositoryFeed(normalizedRepositories, query, cacheAvailable)
+}
+
+// repositoryFeed は検証済みリポジトリを検索し、Alfred向け応答を生成する。
+func (app App) repositoryFeed(
+	repositories []repository,
+	query string,
+	cacheAvailable bool,
+) Feed {
 	if len(repositories) == 0 {
 		return emptyFeed()
 	}
 
-	matchingRepositories, validRepositoryCount := filterRepositories(repositories, query)
-	if validRepositoryCount == 0 {
-		return repositoryFailureFeed(false)
-	}
+	matchingRepositories := filterRepositories(repositories, query)
 	if len(matchingRepositories) == 0 {
 		return noMatchFeed()
 	}
 
 	avatarPaths := make(map[int64]string)
+	avatarRefreshNeeded := false
 	if app.avatars != nil {
-		avatarPaths = app.avatars.Paths(ctx, repositoryOwners(matchingRepositories))
+		avatarResult := app.avatars.Paths(repositoryOwners(matchingRepositories))
+		avatarPaths = avatarResult.Paths
+		avatarRefreshNeeded = avatarResult.RefreshNeeded
 	}
 
 	items := repositoryItems(matchingRepositories, avatarPaths)
 
-	return Feed{Items: items}
+	return Feed{
+		Items:               items,
+		avatarRefreshNeeded: cacheAvailable && avatarRefreshNeeded,
+	}
 }
 
 // routeInput は利用者入力を固定リンク、Project検索、リポジトリ検索へ分類する。
@@ -359,26 +405,42 @@ func parseRepositories(output []byte) ([]repository, error) {
 	return repositories, nil
 }
 
-// filterRepositories は安全性を検証し、検索語を含むリポジトリを抽出する。
-func filterRepositories(repositories []repository, query string) ([]repository, int) {
-	sort.SliceStable(repositories, func(leftIndex, rightIndex int) bool {
-		left := strings.ToLower(repositories[leftIndex].FullName)
-		right := strings.ToLower(repositories[rightIndex].FullName)
+// normalizeRepositories はリポジトリを検証・正規化して安定順へ並べる。
+func normalizeRepositories(repositories []repository) ([]repository, int) {
+	normalizedRepositories := make([]repository, 0, len(repositories))
+	for _, value := range repositories {
+		if value.ID <= 0 ||
+			value.FullName == "" ||
+			!isGitHubRepositoryURL(value.HTMLURL, value.FullName) {
+			continue
+		}
+
+		if value.Description != nil {
+			description := boundedDisplayText(*value.Description, repositoryDescriptionLimit)
+			value.Description = &description
+		}
+		normalizedRepositories = append(normalizedRepositories, value)
+	}
+
+	sort.SliceStable(normalizedRepositories, func(leftIndex, rightIndex int) bool {
+		left := strings.ToLower(normalizedRepositories[leftIndex].FullName)
+		right := strings.ToLower(normalizedRepositories[rightIndex].FullName)
 		if left == right {
-			return repositories[leftIndex].FullName < repositories[rightIndex].FullName
+			return normalizedRepositories[leftIndex].FullName <
+				normalizedRepositories[rightIndex].FullName
 		}
 
 		return left < right
 	})
 
-	normalizedQuery := strings.ToLower(strings.TrimSpace(query))
+	return normalizedRepositories, len(normalizedRepositories)
+}
+
+// filterRepositories は検証済みリポジトリから検索語を含む項目を抽出する。
+func filterRepositories(repositories []repository, query string) []repository {
+	normalizedQuery := normalizedFilterQuery(query)
 	matches := make([]repository, 0, len(repositories))
-	validRepositoryCount := 0
 	for _, value := range repositories {
-		if value.ID <= 0 || value.FullName == "" || !isGitHubRepositoryURL(value.HTMLURL, value.FullName) {
-			continue
-		}
-		validRepositoryCount++
 		if normalizedQuery != "" && !strings.Contains(strings.ToLower(value.FullName), normalizedQuery) {
 			continue
 		}
@@ -386,7 +448,12 @@ func filterRepositories(repositories []repository, query string) ([]repository, 
 		matches = append(matches, value)
 	}
 
-	return matches, validRepositoryCount
+	return matches
+}
+
+// normalizedFilterQuery は検索語の前後空白と大文字小文字を正規化する。
+func normalizedFilterQuery(query string) string {
+	return strings.ToLower(strings.TrimSpace(query))
 }
 
 // repositoryOwners はリポジトリから所有者情報を抽出する。

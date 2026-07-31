@@ -10,8 +10,22 @@ import (
 
 // main は GitHub上の候補をAlfred Script Filter形式で出力する。
 func main() {
+	if githubrepos.IsBackgroundHelperInvocation(os.Args) {
+		if err := githubrepos.RefreshCachedAvatars(context.Background()); err != nil {
+			_, _ = os.Stderr.WriteString("Unable to refresh GitHub avatars.\n")
+			os.Exit(1)
+		}
+
+		return
+	}
+
 	authenticationAction, authenticationRequested := requestedAuthenticationAction(os.Args)
 	if authenticationRequested {
+		if err := githubrepos.InvalidateListCache(); err != nil {
+			_, _ = os.Stderr.WriteString("Unable to invalidate cached GitHub data.\n")
+			os.Exit(1)
+		}
+
 		runner := githubrepos.NewExecRunner()
 		var authenticationError error
 
@@ -47,6 +61,9 @@ func main() {
 	}
 
 	_, _ = os.Stdout.Write(output)
+	if feed.NeedsAvatarRefresh() {
+		_ = githubrepos.StartAvatarRefreshHelper()
+	}
 }
 
 // requestedAuthenticationAction はTerminal専用の2引数形式だけを認証操作として受け付ける。

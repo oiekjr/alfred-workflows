@@ -129,27 +129,46 @@ func (app App) runProjects(ctx context.Context, githubCLIPath string, query stri
 	if err != nil {
 		return projectFailureFeed(false)
 	}
+
+	normalizedProjects, validProjectCount, _ := normalizeProjects(projects)
+	if len(projects) > 0 && validProjectCount == 0 {
+		return projectFailureFeed(false)
+	}
+	cacheAvailable := false
+	if app.lists != nil {
+		cacheAvailable = app.lists.StoreProjects(normalizedProjects) == nil
+	}
+
+	return app.projectFeed(normalizedProjects, query, cacheAvailable)
+}
+
+// projectFeed は検証済みOpen Projectを検索し、Alfred向け応答を生成する。
+func (app App) projectFeed(
+	projects []project,
+	query string,
+	cacheAvailable bool,
+) Feed {
 	if len(projects) == 0 {
 		return emptyProjectFeed()
 	}
 
-	matchingProjects, validProjectCount, openProjectCount := filterProjects(projects, query)
-	if validProjectCount == 0 {
-		return projectFailureFeed(false)
-	}
-	if openProjectCount == 0 {
-		return emptyProjectFeed()
-	}
+	matchingProjects := filterProjects(projects, query)
 	if len(matchingProjects) == 0 {
 		return noMatchingProjectFeed()
 	}
 
 	avatarPaths := make(map[int64]string)
+	avatarRefreshNeeded := false
 	if app.avatars != nil {
-		avatarPaths = app.avatars.Paths(ctx, projectOwners(matchingProjects))
+		avatarResult := app.avatars.Paths(projectOwners(matchingProjects))
+		avatarPaths = avatarResult.Paths
+		avatarRefreshNeeded = avatarResult.RefreshNeeded
 	}
 
-	return Feed{Items: projectItems(matchingProjects, avatarPaths)}
+	return Feed{
+		Items:               projectItems(matchingProjects, avatarPaths),
+		avatarRefreshNeeded: cacheAvailable && avatarRefreshNeeded,
+	}
 }
 
 // parseProjects は改行区切りのGitHub GraphQL応答を解析する。
@@ -192,10 +211,9 @@ func ownerWithAvatarID(owner githubOwner) githubOwner {
 	return owner
 }
 
-// filterProjects は安全性を検証し、Openかつ検索語を含むProjectを抽出する。
-func filterProjects(projects []project, query string) ([]project, int, int) {
-	normalizedQuery := strings.ToLower(strings.TrimSpace(query))
-	matches := make([]project, 0, len(projects))
+// normalizeProjects はProjectを検証・重複排除し、Open Projectを安定順へ並べる。
+func normalizeProjects(projects []project) ([]project, int, int) {
+	normalizedProjects := make([]project, 0, len(projects))
 	seenProjectIDs := make(map[string]struct{})
 	validProjectCount := 0
 	openProjectCount := 0
@@ -219,6 +237,34 @@ func filterProjects(projects []project, query string) ([]project, int, int) {
 		}
 		openProjectCount++
 
+		normalizedProjects = append(normalizedProjects, value)
+	}
+
+	sort.SliceStable(normalizedProjects, func(leftIndex, rightIndex int) bool {
+		leftOwner := strings.ToLower(normalizedProjects[leftIndex].Owner.Login)
+		rightOwner := strings.ToLower(normalizedProjects[rightIndex].Owner.Login)
+		if leftOwner != rightOwner {
+			return leftOwner < rightOwner
+		}
+
+		leftTitle := strings.ToLower(normalizedProjects[leftIndex].Title)
+		rightTitle := strings.ToLower(normalizedProjects[rightIndex].Title)
+		if leftTitle != rightTitle {
+			return leftTitle < rightTitle
+		}
+
+		return normalizedProjects[leftIndex].Number <
+			normalizedProjects[rightIndex].Number
+	})
+
+	return normalizedProjects, validProjectCount, openProjectCount
+}
+
+// filterProjects は検証済みOpen Projectから検索語を含む項目を抽出する。
+func filterProjects(projects []project, query string) []project {
+	normalizedQuery := normalizedFilterQuery(query)
+	matches := make([]project, 0, len(projects))
+	for _, value := range projects {
 		ownerMatches := strings.Contains(strings.ToLower(value.Owner.Login), normalizedQuery)
 		titleMatches := strings.Contains(strings.ToLower(value.Title), normalizedQuery)
 		if normalizedQuery != "" && !ownerMatches && !titleMatches {
@@ -228,23 +274,7 @@ func filterProjects(projects []project, query string) ([]project, int, int) {
 		matches = append(matches, value)
 	}
 
-	sort.SliceStable(matches, func(leftIndex, rightIndex int) bool {
-		leftOwner := strings.ToLower(matches[leftIndex].Owner.Login)
-		rightOwner := strings.ToLower(matches[rightIndex].Owner.Login)
-		if leftOwner != rightOwner {
-			return leftOwner < rightOwner
-		}
-
-		leftTitle := strings.ToLower(matches[leftIndex].Title)
-		rightTitle := strings.ToLower(matches[rightIndex].Title)
-		if leftTitle != rightTitle {
-			return leftTitle < rightTitle
-		}
-
-		return matches[leftIndex].Number < matches[rightIndex].Number
-	})
-
-	return matches, validProjectCount, openProjectCount
+	return matches
 }
 
 // normalizedDisplayText は外部入力の改行や連続空白を表示用に正規化する。

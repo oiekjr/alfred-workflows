@@ -46,12 +46,32 @@ func TestWorkflowDeclaresGitHubNavigatorActions(t *testing.T) {
 
 	for _, requiredValue := range []string{
 		"<string>GitHub Navigator</string>",
-		"<string>0.2.0</string>",
+		"<string>0.2.1</string>",
 		"<string>login-projects</string>",
 		"<string>authorize-projects</string>",
 	} {
 		if !strings.Contains(definition, requiredValue) {
 			t.Errorf("workflow does not contain %q", requiredValue)
+		}
+	}
+}
+
+// TestWorkflowDebouncesSlowAPIQueries は初回入力を即時実行しつつ追加入力を抑制する。
+func TestWorkflowDebouncesSlowAPIQueries(t *testing.T) {
+	plist, err := os.ReadFile("../../workflows/github-repositories/info.plist")
+	if err != nil {
+		t.Fatalf("read workflow definition: %v", err)
+	}
+	definition := string(plist)
+
+	for _, requiredSetting := range []string{
+		"<key>queuedelaycustom</key>\n\t\t\t\t<integer>3</integer>",
+		"<key>queuedelayimmediatelyinitially</key>\n\t\t\t\t<true/>",
+		"<key>queuedelaymode</key>\n\t\t\t\t<integer>2</integer>",
+		"<key>queuemode</key>\n\t\t\t\t<integer>1</integer>",
+	} {
+		if !strings.Contains(definition, requiredSetting) {
+			t.Errorf("workflow does not contain run setting %q", requiredSetting)
 		}
 	}
 }

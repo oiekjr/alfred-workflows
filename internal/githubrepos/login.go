@@ -9,6 +9,16 @@ import (
 
 // currentLoginHelperToken は実行中バイナリの検証済み絶対パスを安全な転送形式へ変換する。
 func currentLoginHelperToken() (string, error) {
+	executablePath, err := currentWorkflowExecutablePath()
+	if err != nil {
+		return "", err
+	}
+
+	return base64.StdEncoding.EncodeToString([]byte(executablePath)), nil
+}
+
+// currentWorkflowExecutablePath は実行中バイナリの検証済み絶対パスを返す。
+func currentWorkflowExecutablePath() (string, error) {
 	executablePath, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("resolve workflow executable: %w", err)
@@ -38,5 +48,5 @@ func currentLoginHelperToken() (string, error) {
 		return "", fmt.Errorf("workflow executable permissions are unsafe")
 	}
 
-	return base64.StdEncoding.EncodeToString([]byte(executablePath)), nil
+	return executablePath, nil
 }

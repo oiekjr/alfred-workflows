@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAppRunShowsInstallItemWhenGitHubCLIIsMissingは未導入時の案内を検証する。
@@ -86,6 +88,195 @@ func TestAppRunOpensFixedLinksWithoutGitHubCLI(t *testing.T) {
 				t.Fatalf("GitHub CLI calls = find %d, commands %d", runner.findCalls, len(runner.commands))
 			}
 		})
+	}
+}
+
+// TestAppRunUsesRepositoryCacheWithoutGitHubCLI は追加入力がローカル検索だけで完了することを検証する。
+func TestAppRunUsesRepositoryCacheWithoutGitHubCLI(t *testing.T) {
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	if err := cache.StoreRepositories([]repository{
+		{
+			ID:       1,
+			FullName: "owner/alpha-repository",
+			HTMLURL:  "https://github.com/owner/alpha-repository",
+		},
+		{
+			ID:       2,
+			FullName: "owner/other",
+			HTMLURL:  "https://github.com/owner/other",
+		},
+	}); err != nil {
+		t.Fatalf("store repository cache: %v", err)
+	}
+	runner := &fakeRunner{findErr: errors.New("GitHub CLI must not be resolved")}
+	app := NewApp(runner)
+	app.lists = cache
+	app.avatars = nil
+
+	feed := app.Run(context.Background(), "PHA-REPO")
+
+	if len(feed.Items) != 1 || feed.Items[0].Title != "owner/alpha-repository" {
+		t.Fatalf("cached items = %#v", feed.Items)
+	}
+	if runner.findCalls != 0 || len(runner.commands) != 0 {
+		t.Fatalf("GitHub CLI calls = find %d, commands %d", runner.findCalls, len(runner.commands))
+	}
+}
+
+// TestAppRunFetchesRepositoriesBeforeLocalFiltering は空入力で取得し1文字からローカル絞り込みすることを検証する。
+func TestAppRunFetchesRepositoriesBeforeLocalFiltering(t *testing.T) {
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	apiOutput := strings.Join([]string{
+		`{"id":1,"full_name":"owner/alpha","html_url":"https://github.com/owner/alpha","private":false,"description":null,"archived":false,"fork":false}`,
+		`{"id":2,"full_name":"owner/other","html_url":"https://github.com/owner/other","private":false,"description":null,"archived":false,"fork":false}`,
+	}, "\n")
+	runner := authenticatedRunner(apiOutput)
+	app := NewApp(runner)
+	app.lists = cache
+	app.avatars = nil
+
+	initialFeed := app.Run(context.Background(), "")
+	oneCharacterFeed := app.Run(context.Background(), "a")
+	otherFeed := app.Run(context.Background(), "ot")
+
+	if len(initialFeed.Items) != 2 {
+		t.Fatalf("initial items = %#v, want all repositories", initialFeed.Items)
+	}
+	if len(oneCharacterFeed.Items) != 1 || oneCharacterFeed.Items[0].Title != "owner/alpha" {
+		t.Fatalf("one-character items = %#v, want owner/alpha", oneCharacterFeed.Items)
+	}
+	if len(otherFeed.Items) != 1 || otherFeed.Items[0].Title != "owner/other" {
+		t.Fatalf("other items = %#v, want owner/other", otherFeed.Items)
+	}
+	if runner.findCalls != 1 || len(runner.commands) != 3 {
+		t.Fatalf(
+			"GitHub CLI calls = find %d, commands %d, want one fetch sequence",
+			runner.findCalls,
+			len(runner.commands),
+		)
+	}
+}
+
+// TestAppRunUsesProjectCacheWithoutGitHubCLI はProjectの追加入力もローカル検索になることを検証する。
+func TestAppRunUsesProjectCacheWithoutGitHubCLI(t *testing.T) {
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	if err := cache.StoreProjects([]project{{
+		ID:      "PVT_1",
+		Number:  1,
+		Title:   "Delivery Roadmap",
+		HTMLURL: "https://github.com/orgs/example-org/projects/1",
+		Public:  true,
+		Owner: githubOwner{
+			ID:        10,
+			NodeID:    "O_1",
+			Login:     "example-org",
+			AvatarURL: "https://avatars.githubusercontent.com/u/10?v=4",
+			Type:      "Organization",
+		},
+	}}); err != nil {
+		t.Fatalf("store project cache: %v", err)
+	}
+	runner := &fakeRunner{findErr: errors.New("GitHub CLI must not be resolved")}
+	app := NewApp(runner)
+	app.lists = cache
+	app.avatars = nil
+
+	feed := app.Run(context.Background(), "project VERY ROAD")
+
+	if len(feed.Items) != 1 || feed.Items[0].Title != "example-org / Delivery Roadmap" {
+		t.Fatalf("cached items = %#v", feed.Items)
+	}
+	if runner.findCalls != 0 || len(runner.commands) != 0 {
+		t.Fatalf("GitHub CLI calls = find %d, commands %d", runner.findCalls, len(runner.commands))
+	}
+}
+
+// TestNormalizedFilterQueryTrimsAndFoldsCase は1文字を含む検索語の正規化を検証する。
+func TestNormalizedFilterQueryTrimsAndFoldsCase(t *testing.T) {
+	testCases := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{name: "empty", query: "", want: ""},
+		{name: "one ASCII character", query: " A ", want: "a"},
+		{name: "two ASCII characters", query: " AB ", want: "ab"},
+		{name: "one Japanese character", query: " 道 ", want: "道"},
+		{name: "two Japanese characters", query: " 道路 ", want: "道路"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := normalizedFilterQuery(testCase.query)
+
+			if got != testCase.want {
+				t.Fatalf("normalized query = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// TestAppRunCachesFetchedDataWithoutSearchQuery は検索文字列を保存せず次回入力で再利用する。
+func TestAppRunCachesFetchedDataWithoutSearchQuery(t *testing.T) {
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	runner := authenticatedRunner(
+		`{"id":1,"full_name":"owner/repository","html_url":"https://github.com/owner/repository","private":true,"description":null,"archived":false,"fork":false}`,
+	)
+	app := NewApp(runner)
+	app.lists = cache
+	app.avatars = nil
+
+	firstFeed := app.Run(context.Background(), "sensitive-filter-value")
+	secondFeed := app.Run(context.Background(), "POSIT")
+
+	assertSingleItem(t, firstFeed, "No matching repositories", false, "")
+	if len(secondFeed.Items) != 1 || secondFeed.Items[0].Title != "owner/repository" {
+		t.Fatalf("cached second items = %#v", secondFeed.Items)
+	}
+	if len(runner.commands) != 3 {
+		t.Fatalf("commands = %d, want one version, auth, and API sequence", len(runner.commands))
+	}
+	data, err := os.ReadFile(cache.path(repositoryListCacheName))
+	if err != nil {
+		t.Fatalf("read repository cache: %v", err)
+	}
+	if strings.Contains(string(data), "sensitive-filter-value") {
+		t.Fatal("repository cache contains the Alfred search query")
+	}
+}
+
+// TestAppRunRequestsBackgroundAvatarRefresh は画像不足が結果表示を待たせないことを検証する。
+func TestAppRunRequestsBackgroundAvatarRefresh(t *testing.T) {
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	if err := cache.StoreRepositories([]repository{{
+		ID:       1,
+		FullName: "owner/repository",
+		HTMLURL:  "https://github.com/owner/repository",
+		Owner: githubOwner{
+			ID:        10,
+			Login:     "owner",
+			AvatarURL: "https://avatars.githubusercontent.com/u/10?v=4",
+			Type:      "User",
+		},
+	}}); err != nil {
+		t.Fatalf("store repository cache: %v", err)
+	}
+	avatars := &fakeAvatarProvider{refreshNeeded: true}
+	app := NewApp(&fakeRunner{findErr: errors.New("GitHub CLI must not be resolved")})
+	app.lists = cache
+	app.avatars = avatars
+
+	feed := app.Run(context.Background(), "")
+
+	if !feed.NeedsAvatarRefresh() {
+		t.Fatal("feed does not request a background avatar refresh")
+	}
+	output, err := json.Marshal(feed)
+	if err != nil {
+		t.Fatalf("marshal feed: %v", err)
+	}
+	if strings.Contains(string(output), "avatarRefreshNeeded") {
+		t.Fatalf("internal refresh state leaked into Alfred JSON: %s", output)
 	}
 }
 
@@ -483,14 +674,18 @@ type fakeRunner struct {
 }
 
 type fakeAvatarProvider struct {
-	paths  map[int64]string
-	owners []githubOwner
+	paths         map[int64]string
+	owners        []githubOwner
+	refreshNeeded bool
 }
 
 // Paths はテスト用のアバターパスを返す。
-func (provider *fakeAvatarProvider) Paths(_ context.Context, owners []githubOwner) map[int64]string {
+func (provider *fakeAvatarProvider) Paths(owners []githubOwner) avatarPathResult {
 	provider.owners = append(provider.owners, owners...)
-	return provider.paths
+	return avatarPathResult{
+		Paths:         provider.paths,
+		RefreshNeeded: provider.refreshNeeded,
+	}
 }
 
 // FindExecutableはテスト用の実行ファイル検索結果を返す。

@@ -32,7 +32,12 @@ const (
 
 // avatarProvider は所有者ごとのローカルアバターパスを提供する。
 type avatarProvider interface {
-	Paths(ctx context.Context, owners []githubOwner) map[int64]string
+	Paths(owners []githubOwner) avatarPathResult
+}
+
+type avatarPathResult struct {
+	Paths         map[int64]string
+	RefreshNeeded bool
 }
 
 type avatarCache struct {
@@ -45,7 +50,7 @@ type avatarCache struct {
 func newEnvironmentAvatarCache() *avatarCache {
 	return newAvatarCache(
 		trustedAlfredCacheRootFromEnvironment(),
-		newAvatarHTTPClient(),
+		nil,
 	)
 }
 
@@ -84,17 +89,58 @@ func newAvatarHTTPClient() *http.Client {
 	}
 }
 
-// Paths はキャッシュ済み画像を返し、必要な画像だけを制限付きで取得する。
-func (cache *avatarCache) Paths(parentContext context.Context, owners []githubOwner) map[int64]string {
-	paths := make(map[int64]string)
+// Paths は通信せず、キャッシュ済み画像と更新要否を返す。
+func (cache *avatarCache) Paths(owners []githubOwner) avatarPathResult {
+	result := avatarPathResult{Paths: make(map[int64]string)}
+	if cache == nil ||
+		cache.rootDirectory == "" ||
+		!filepath.IsAbs(cache.rootDirectory) {
+		return result
+	}
+	if _, err := ensureSecureCacheSubdirectory(cache.rootDirectory, "avatars"); err != nil {
+		return result
+	}
+
+	seenOwnerIDs := make(map[int64]struct{})
+	for _, owner := range owners {
+		if owner.ID <= 0 {
+			continue
+		}
+		if _, exists := seenOwnerIDs[owner.ID]; exists {
+			continue
+		}
+		seenOwnerIDs[owner.ID] = struct{}{}
+
+		path := cache.path(owner.ID)
+		info, err := validatePrivateRegularFile(path)
+		if err == nil {
+			result.Paths[owner.ID] = path
+			if cache.isFresh(info.ModTime()) {
+				continue
+			}
+		}
+
+		if _, err := normalizedAvatarURL(owner.AvatarURL, owner.ID); err == nil {
+			result.RefreshNeeded = true
+		}
+	}
+
+	return result
+}
+
+// Refresh は不足または期限切れの画像だけを制限付きで取得する。
+func (cache *avatarCache) Refresh(
+	parentContext context.Context,
+	owners []githubOwner,
+) error {
 	if cache == nil ||
 		cache.client == nil ||
 		cache.rootDirectory == "" ||
 		!filepath.IsAbs(cache.rootDirectory) {
-		return paths
+		return nil
 	}
 	if _, err := ensureSecureCacheSubdirectory(cache.rootDirectory, "avatars"); err != nil {
-		return paths
+		return err
 	}
 
 	downloadOwners := make([]githubOwner, 0)
@@ -109,12 +155,9 @@ func (cache *avatarCache) Paths(parentContext context.Context, owners []githubOw
 		seenOwnerIDs[owner.ID] = struct{}{}
 
 		path := cache.path(owner.ID)
-		info, err := validatePrivateRegularFile(path)
-		if err == nil {
-			paths[owner.ID] = path
-			if cache.isFresh(info.ModTime()) {
-				continue
-			}
+		if info, err := validatePrivateRegularFile(path); err == nil &&
+			cache.isFresh(info.ModTime()) {
+			continue
 		}
 
 		if len(downloadOwners) < maxAvatarDownloadsPerRun {
@@ -125,7 +168,7 @@ func (cache *avatarCache) Paths(parentContext context.Context, owners []githubOw
 	}
 
 	if len(downloadOwners) == 0 {
-		return paths
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(parentContext, avatarDownloadTimeout)
@@ -139,7 +182,6 @@ func (cache *avatarCache) Paths(parentContext context.Context, owners []githubOw
 
 	workerCount := min(maxConcurrentAvatarDownloads, len(downloadOwners))
 	var workers sync.WaitGroup
-	var pathsMutex sync.Mutex
 	workers.Add(workerCount)
 
 	for range workerCount {
@@ -147,21 +189,14 @@ func (cache *avatarCache) Paths(parentContext context.Context, owners []githubOw
 			defer workers.Done()
 
 			for owner := range jobs {
-				path, err := cache.download(ctx, owner)
-				if err != nil {
-					continue
-				}
-
-				pathsMutex.Lock()
-				paths[owner.ID] = path
-				pathsMutex.Unlock()
+				_, _ = cache.download(ctx, owner)
 			}
 		}()
 	}
 
 	workers.Wait()
 
-	return paths
+	return nil
 }
 
 // path は所有者IDから安全なキャッシュファイル名を生成する。

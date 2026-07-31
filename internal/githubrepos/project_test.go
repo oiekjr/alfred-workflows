@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -88,6 +89,42 @@ func TestAppRunFiltersProjectsByOwnerOrTitle(t *testing.T) {
 				t.Fatalf("items = %#v", feed.Items)
 			}
 		})
+	}
+}
+
+// TestAppRunFiltersProjectsFromOneCharacter はProject一覧を1文字からローカル絞り込みすることを検証する。
+func TestAppRunFiltersProjectsFromOneCharacter(t *testing.T) {
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	apiOutput := strings.Join([]string{
+		`{"id":"PVT_1","number":1,"title":"Roadmap","html_url":"https://github.com/orgs/example-org/projects/1","short_description":"","public":true,"closed":false,"owner":{"node_id":"O_1","login":"example-org","avatar_url":"https://avatars.githubusercontent.com/u/10?v=4","type":"Organization"}}`,
+		`{"id":"PVT_2","number":2,"title":"Operations","html_url":"https://github.com/orgs/another-org/projects/2","short_description":"","public":false,"closed":false,"owner":{"node_id":"O_2","login":"another-org","avatar_url":"https://avatars.githubusercontent.com/u/20?v=4","type":"Organization"}}`,
+	}, "\n")
+	runner := authenticatedProjectRunner(apiOutput)
+	app := NewApp(runner)
+	app.lists = cache
+	app.avatars = nil
+
+	initialFeed := app.Run(context.Background(), "project")
+	oneCharacterFeed := app.Run(context.Background(), "project x")
+	operationsFeed := app.Run(context.Background(), "project op")
+
+	if len(initialFeed.Items) != 2 {
+		t.Fatalf("initial items = %#v, want all projects", initialFeed.Items)
+	}
+	if len(oneCharacterFeed.Items) != 1 ||
+		oneCharacterFeed.Items[0].Title != "example-org / Roadmap" {
+		t.Fatalf("one-character items = %#v, want example-org / Roadmap", oneCharacterFeed.Items)
+	}
+	if len(operationsFeed.Items) != 1 ||
+		operationsFeed.Items[0].Title != "another-org / Operations" {
+		t.Fatalf("operations items = %#v, want another-org / Operations", operationsFeed.Items)
+	}
+	if runner.findCalls != 1 || len(runner.commands) != 3 {
+		t.Fatalf(
+			"GitHub CLI calls = find %d, commands %d, want one fetch sequence",
+			runner.findCalls,
+			len(runner.commands),
+		)
 	}
 }
 

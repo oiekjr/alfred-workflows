@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-// TestAvatarCacheDownloadsAndReusesImage はアバターの取得と再利用を検証する。
-func TestAvatarCacheDownloadsAndReusesImage(t *testing.T) {
+// TestAvatarCacheReturnsImmediatelyAndRefreshesImage は非同期更新用の分離を検証する。
+func TestAvatarCacheReturnsImmediatelyAndRefreshesImage(t *testing.T) {
 	imageData := testPNG(t)
 	var requestCount atomic.Int32
 	client := &http.Client{
@@ -45,12 +45,22 @@ func TestAvatarCacheDownloadsAndReusesImage(t *testing.T) {
 		Type:      "User",
 	}
 
-	firstPaths := cache.Paths(context.Background(), []githubOwner{owner})
-	secondPaths := cache.Paths(context.Background(), []githubOwner{owner})
+	firstResult := cache.Paths([]githubOwner{owner})
+	if len(firstResult.Paths) != 0 || !firstResult.RefreshNeeded {
+		t.Fatalf("initial result = %#v, want refresh without path", firstResult)
+	}
+	if requestCount.Load() != 0 {
+		t.Fatalf("foreground request count = %d, want 0", requestCount.Load())
+	}
+
+	if err := cache.Refresh(context.Background(), []githubOwner{owner}); err != nil {
+		t.Fatalf("refresh avatar: %v", err)
+	}
+	secondResult := cache.Paths([]githubOwner{owner})
 
 	expectedPath := filepath.Join(cacheDirectory, "avatars", "1.png")
-	if firstPaths[owner.ID] != expectedPath || secondPaths[owner.ID] != expectedPath {
-		t.Fatalf("paths = %#v and %#v, want %q", firstPaths, secondPaths, expectedPath)
+	if secondResult.Paths[owner.ID] != expectedPath || secondResult.RefreshNeeded {
+		t.Fatalf("refreshed result = %#v, want %q", secondResult, expectedPath)
 	}
 	info, err := os.Stat(expectedPath)
 	if err != nil {
@@ -81,10 +91,13 @@ func TestAvatarCacheRejectsUnsupportedHost(t *testing.T) {
 		Type:      "User",
 	}
 
-	paths := cache.Paths(context.Background(), []githubOwner{owner})
+	result := cache.Paths([]githubOwner{owner})
+	if err := cache.Refresh(context.Background(), []githubOwner{owner}); err != nil {
+		t.Fatalf("refresh unsupported avatar: %v", err)
+	}
 
-	if len(paths) != 0 {
-		t.Fatalf("paths = %#v, want empty", paths)
+	if len(result.Paths) != 0 || result.RefreshNeeded {
+		t.Fatalf("result = %#v, want empty without refresh", result)
 	}
 	if requestCount.Load() != 0 {
 		t.Errorf("request count = %d, want 0", requestCount.Load())
@@ -118,10 +131,13 @@ func TestAvatarCacheUsesStaleImageWhenRefreshFails(t *testing.T) {
 		t.Fatalf("expire cached avatar: %v", err)
 	}
 
-	paths := cache.Paths(context.Background(), []githubOwner{owner})
+	result := cache.Paths([]githubOwner{owner})
+	if err := cache.Refresh(context.Background(), []githubOwner{owner}); err != nil {
+		t.Fatalf("refresh stale avatar: %v", err)
+	}
 
-	if paths[owner.ID] != cachedPath {
-		t.Fatalf("path = %q, want %q", paths[owner.ID], cachedPath)
+	if result.Paths[owner.ID] != cachedPath || !result.RefreshNeeded {
+		t.Fatalf("result = %#v, want stale path with refresh", result)
 	}
 }
 
@@ -147,10 +163,10 @@ func TestAvatarCacheRejectsSymlinkDirectory(t *testing.T) {
 		Type:      "User",
 	}
 
-	paths := cache.Paths(context.Background(), []githubOwner{owner})
+	result := cache.Paths([]githubOwner{owner})
 
-	if len(paths) != 0 {
-		t.Fatalf("paths = %#v, want empty", paths)
+	if len(result.Paths) != 0 || result.RefreshNeeded {
+		t.Fatalf("result = %#v, want empty", result)
 	}
 	if requestCount.Load() != 0 {
 		t.Errorf("request count = %d, want 0", requestCount.Load())
