@@ -46,7 +46,7 @@ func TestWorkflowDeclaresGitHubNavigatorActions(t *testing.T) {
 
 	for _, requiredValue := range []string{
 		"<string>GitHub Navigator</string>",
-		"<string>0.2.1</string>",
+		"<string>0.2.2</string>",
 		"<string>login-projects</string>",
 		"<string>authorize-projects</string>",
 	} {

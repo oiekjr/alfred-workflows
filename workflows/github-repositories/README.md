@@ -94,19 +94,19 @@ If the workflow reports that GitHub CLI is missing or outdated:
 
 If repository search asks you to sign in, complete the `Sign in to GitHub` action. If Project search asks for additional access, use the Project-specific sign-in or authorization action.
 
-If you run `gh auth logout` or `gh auth switch` outside the workflow, results from the previous active account can remain visible for up to 60 seconds. Retry after the short-lived list cache expires.
+If you run `gh auth logout` or `gh auth switch` outside the workflow, retry the Alfred input. GitHub Navigator detects the standard GitHub CLI configuration change and does not reuse a list cached for the previous active account.
 
 Missing or unavailable avatars do not prevent repository or Project results from appearing.
 
 ## Review data handling
 
-After authentication succeeds, the workflow retrieves repository and Project lists with `gh api`. It validates and normalizes the minimum required fields, then stores them in Alfred's private workflow cache for 60 seconds. Expired cache files are removed the next time they are read. Authentication actions and invalid cache formats also invalidate the list cache.
+After authentication succeeds, the workflow retrieves repository and Project lists with `gh api`. It validates and normalizes the minimum required fields, then stores them in Alfred's private workflow cache for five minutes. Each list is bound to the GitHub.com hostname, active account login, and non-secret identity metadata for the standard GitHub CLI `hosts.yml` file. A changed account configuration, expiry, authentication action, or invalid cache format prevents the list from being reused.
 
 While the list cache is valid, the workflow does not launch `gh`; it filters the cached data locally in Go. The search text entered in Alfred is not stored in the cache.
 
 Projects are retrieved with a fixed GraphQL query. Search text is never added to that query and is matched locally after retrieval.
 
-Access tokens, search text, GitHub API error details, and GitHub CLI standard error output are neither cached nor displayed in Alfred.
+Access tokens, GitHub CLI configuration contents, search text, GitHub API error details, and GitHub CLI standard error output are neither cached nor displayed in Alfred.
 
 Repository and Project destination URLs are validated before they become selectable. Only the expected GitHub.com repository and Project URL forms are accepted.
 

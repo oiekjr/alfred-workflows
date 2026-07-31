@@ -68,12 +68,16 @@ func RefreshCachedAvatars(ctx context.Context) error {
 	}
 	defer releaseAvatarRefreshLock(lock)
 
+	configIdentity, ok := (environmentGitHubConfigProvider{}).CurrentIdentity()
+	if !ok {
+		return nil
+	}
 	lists := newListCache(rootDirectory, time.Now)
 	owners := make([]githubOwner, 0)
-	if repositories, ok := lists.LoadRepositories(); ok {
+	if repositories, ok := lists.LoadRepositories(configIdentity); ok {
 		owners = append(owners, repositoryOwners(repositories)...)
 	}
-	if projects, ok := lists.LoadProjects(); ok {
+	if projects, ok := lists.LoadProjects(configIdentity); ok {
 		owners = append(owners, projectOwners(projects)...)
 	}
 	if len(owners) == 0 {

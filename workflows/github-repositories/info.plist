@@ -310,7 +310,7 @@
 • gh pr / gh prs: open GitHub Pull requests
 • gh project / gh projects [&lt;text&gt;]: list or search accessible open Projects
 
-Validated repository and Project lists are cached privately for 60 seconds so additional typing is filtered locally from the first query character. The initial request runs immediately; later input waits 300 ms after the last character. Owner avatars are refreshed in the background and cached privately for seven days.
+Validated repository and Project lists are bound to the active GitHub account and cached privately for five minutes, so additional typing is filtered locally from the first query character. An account switch invalidates the matching list cache before use. The initial request runs immediately; later input waits 300 ms after the last character. Owner avatars are refreshed in the background and cached privately for seven days.
 
 Requirements:
 • Alfred 5 with Powerpack
@@ -389,7 +389,7 @@ If authentication or read-only Projects access is required, select the displayed
 	<key>variablesdontexport</key>
 	<array/>
 	<key>version</key>
-	<string>0.2.1</string>
+	<string>0.2.2</string>
 	<key>webaddress</key>
 	<string>https://github.com/oiekjr/alfred-workflows</string>
 </dict>

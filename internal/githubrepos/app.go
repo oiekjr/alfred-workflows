@@ -78,17 +78,19 @@ type Icon struct {
 
 // App は GitHub CLI との連携処理を提供する。
 type App struct {
-	runner  CommandRunner
-	avatars avatarProvider
-	lists   listCacheProvider
+	runner       CommandRunner
+	avatars      avatarProvider
+	lists        listCacheProvider
+	githubConfig githubConfigProvider
 }
 
 // NewApp は GitHub上の対象を列挙するアプリケーションを初期化する。
 func NewApp(runner CommandRunner) App {
 	return App{
-		runner:  runner,
-		avatars: newEnvironmentAvatarCache(),
-		lists:   newEnvironmentListCache(),
+		runner:       runner,
+		avatars:      newEnvironmentAvatarCache(),
+		lists:        newEnvironmentListCache(),
+		githubConfig: environmentGitHubConfigProvider{},
 	}
 }
 
@@ -110,15 +112,27 @@ func (app App) Run(ctx context.Context, query string) Feed {
 		)
 	}
 
+	configIdentity, configAvailable := app.currentGitHubConfigIdentity()
+	if app.lists != nil && !configAvailable {
+		_ = app.lists.Invalidate()
+	}
 	if input.mode == projectsInput {
-		if app.lists != nil {
-			if projects, ok := app.lists.LoadProjects(); ok {
-				return app.projectFeed(projects, input.query, true)
+		if app.lists != nil && configAvailable {
+			if projects, ok := app.lists.LoadProjects(configIdentity); ok {
+				if app.githubConfigStillCurrent(configIdentity) {
+					return app.projectFeed(projects, input.query, true)
+				}
+				_ = app.lists.Invalidate()
+				configIdentity, configAvailable = app.currentGitHubConfigIdentity()
 			}
 		}
-	} else if app.lists != nil {
-		if repositories, ok := app.lists.LoadRepositories(); ok {
-			return app.repositoryFeed(repositories, input.query, true)
+	} else if app.lists != nil && configAvailable {
+		if repositories, ok := app.lists.LoadRepositories(configIdentity); ok {
+			if app.githubConfigStillCurrent(configIdentity) {
+				return app.repositoryFeed(repositories, input.query, true)
+			}
+			_ = app.lists.Invalidate()
+			configIdentity, configAvailable = app.currentGitHubConfigIdentity()
 		}
 	}
 
@@ -153,8 +167,12 @@ func (app App) Run(ctx context.Context, query string) Feed {
 	}
 
 	authenticationResult := app.runner.Run(ctx, Command{
-		Path:        githubCLIPath,
-		Args:        []string{"auth", "status", "--active", "--hostname", githubHostname},
+		Path: githubCLIPath,
+		Args: []string{
+			"auth", "status",
+			"--active",
+			"--hostname", githubHostname,
+		},
 		Timeout:     authenticationTimeout,
 		StdoutLimit: shortOutputLimit,
 		StderrLimit: stderrLimit,
@@ -178,15 +196,82 @@ func (app App) Run(ctx context.Context, query string) Feed {
 
 		return loginFeed(loginHelperToken())
 	}
+
+	authentication, ok := parseAuthenticationStatus(authenticationResult.Stdout)
+	if !ok {
+		return failureFeed(
+			"Unable to check GitHub authentication",
+			"GitHub CLI returned an invalid authentication response.",
+		)
+	}
+
+	cacheAccount := app.stableCacheAccount(
+		authentication,
+		configIdentity,
+		configAvailable,
+	)
 	if input.mode == projectsInput {
-		if !hasProjectReadScope(authenticationResult.Stdout) {
+		if !hasProjectReadScope(authentication.Scopes) {
 			return projectAuthorizationFeed(loginHelperToken())
 		}
 
-		return app.runProjects(ctx, githubCLIPath, input.query)
+		return app.runProjects(ctx, githubCLIPath, input.query, cacheAccount)
 	}
 
-	return app.runRepositories(ctx, githubCLIPath, input.query)
+	return app.runRepositories(ctx, githubCLIPath, input.query, cacheAccount)
+}
+
+// currentGitHubConfigIdentity は一覧キャッシュ照合用のGitHub CLI設定情報を取得する。
+func (app App) currentGitHubConfigIdentity() (githubConfigIdentity, bool) {
+	if app.githubConfig == nil {
+		return githubConfigIdentity{}, false
+	}
+
+	return app.githubConfig.CurrentIdentity()
+}
+
+// githubConfigStillCurrent は取得済みGitHub CLI設定情報が現在も一致するか確認する。
+func (app App) githubConfigStillCurrent(config githubConfigIdentity) bool {
+	if !config.valid() {
+		return false
+	}
+	currentConfig, ok := app.currentGitHubConfigIdentity()
+
+	return ok && currentConfig == config
+}
+
+// stableCacheAccount は認証確認中に設定が変わっていないアカウントを返す。
+func (app App) stableCacheAccount(
+	authentication authenticationStatus,
+	initialConfig githubConfigIdentity,
+	initialConfigAvailable bool,
+) *githubAccountIdentity {
+	if !initialConfigAvailable {
+		return nil
+	}
+	if !app.githubConfigStillCurrent(initialConfig) {
+		return nil
+	}
+
+	account := githubAccountIdentity{
+		Hostname: authentication.Hostname,
+		Login:    authentication.Login,
+		Config:   initialConfig,
+	}
+	if !account.valid() {
+		return nil
+	}
+
+	return &account
+}
+
+// cacheAccountStillCurrent はAPI取得中に認証主体の設定が変わっていないか確認する。
+func (app App) cacheAccountStillCurrent(account *githubAccountIdentity) bool {
+	if account == nil || !account.valid() {
+		return false
+	}
+
+	return app.githubConfigStillCurrent(account.Config)
 }
 
 // loginHelperToken は認証導線が必要になった時だけ実行ファイルを検証する。
@@ -196,7 +281,12 @@ func loginHelperToken() string {
 }
 
 // runRepositories は閲覧可能なリポジトリを取得してAlfred向け応答を生成する。
-func (app App) runRepositories(ctx context.Context, githubCLIPath string, query string) Feed {
+func (app App) runRepositories(
+	ctx context.Context,
+	githubCLIPath string,
+	query string,
+	cacheAccount *githubAccountIdentity,
+) Feed {
 	repositoriesResult := app.runner.Run(ctx, Command{
 		Path: githubCLIPath,
 		Args: []string{
@@ -229,8 +319,11 @@ func (app App) runRepositories(ctx context.Context, githubCLIPath string, query 
 		return repositoryFailureFeed(false)
 	}
 	cacheAvailable := false
-	if app.lists != nil {
-		cacheAvailable = app.lists.StoreRepositories(normalizedRepositories) == nil
+	if app.lists != nil && app.cacheAccountStillCurrent(cacheAccount) {
+		cacheAvailable = app.lists.StoreRepositories(
+			*cacheAccount,
+			normalizedRepositories,
+		) == nil
 	}
 
 	return app.repositoryFeed(normalizedRepositories, query, cacheAvailable)
@@ -312,19 +405,11 @@ func fixedLinkFeed(title string, subtitle string, targetURL string) Feed {
 }
 
 // hasProjectReadScope はGitHub CLI認証にProject読取権限があるか判定する。
-func hasProjectReadScope(output []byte) bool {
-	for _, line := range strings.Split(string(output), "\n") {
-		scopeStart := strings.Index(line, "Token scopes:")
-		if scopeStart < 0 {
-			continue
-		}
-
-		scopeList := line[scopeStart+len("Token scopes:"):]
-		for _, value := range strings.Split(scopeList, ",") {
-			scope := strings.Trim(strings.TrimSpace(value), "'\"")
-			if scope == projectReadScope || scope == projectWriteScope {
-				return true
-			}
+func hasProjectReadScope(scopes string) bool {
+	for _, value := range strings.Split(scopes, ",") {
+		scope := strings.Trim(strings.TrimSpace(value), "'\"")
+		if scope == projectReadScope || scope == projectWriteScope {
+			return true
 		}
 	}
 

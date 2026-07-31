@@ -94,6 +94,7 @@ func TestAppRunFiltersProjectsByOwnerOrTitle(t *testing.T) {
 
 // TestAppRunFiltersProjectsFromOneCharacter はProject一覧を1文字からローカル絞り込みすることを検証する。
 func TestAppRunFiltersProjectsFromOneCharacter(t *testing.T) {
+	configIdentity := testGitHubConfigIdentity(1)
 	cache := newListCache(secureTempDirectory(t), time.Now)
 	apiOutput := strings.Join([]string{
 		`{"id":"PVT_1","number":1,"title":"Roadmap","html_url":"https://github.com/orgs/example-org/projects/1","short_description":"","public":true,"closed":false,"owner":{"node_id":"O_1","login":"example-org","avatar_url":"https://avatars.githubusercontent.com/u/10?v=4","type":"Organization"}}`,
@@ -103,6 +104,7 @@ func TestAppRunFiltersProjectsFromOneCharacter(t *testing.T) {
 	app := NewApp(runner)
 	app.lists = cache
 	app.avatars = nil
+	app.githubConfig = &fakeGitHubConfigProvider{identity: configIdentity, available: true}
 
 	initialFeed := app.Run(context.Background(), "project")
 	oneCharacterFeed := app.Run(context.Background(), "project x")
@@ -273,12 +275,9 @@ func TestHasProjectReadScopeAcceptsReadAndWriteScopes(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			output := []byte("")
-			if testCase.scopes != nil {
-				output = []byte(authStatusWithScopes(testCase.scopes...))
-			}
+			scopes := strings.Join(testCase.scopes, ", ")
 
-			got := hasProjectReadScope(output)
+			got := hasProjectReadScope(scopes)
 
 			if got != testCase.want {
 				t.Fatalf("hasProjectReadScope() = %t, want %t", got, testCase.want)
@@ -369,11 +368,5 @@ func authenticatedProjectRunner(apiOutput string) *fakeRunner {
 
 // authStatusWithScopes はGitHub CLIの認証状態出力を組み立てる。
 func authStatusWithScopes(scopes ...string) string {
-	quotedScopes := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		quotedScopes = append(quotedScopes, "'"+scope+"'")
-	}
-
-	return "github.com\n  ✓ Logged in to github.com account octocat\n" +
-		"  - Token scopes: " + strings.Join(quotedScopes, ", ") + "\n"
+	return authStatusWithAccount("octocat", scopes...)
 }

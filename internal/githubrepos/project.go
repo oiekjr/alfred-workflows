@@ -106,7 +106,12 @@ const projectJQExpression = `.data.viewer as $viewer |
 }`
 
 // runProjects は閲覧可能なProjectを取得してAlfred向け応答を生成する。
-func (app App) runProjects(ctx context.Context, githubCLIPath string, query string) Feed {
+func (app App) runProjects(
+	ctx context.Context,
+	githubCLIPath string,
+	query string,
+	cacheAccount *githubAccountIdentity,
+) Feed {
 	projectsResult := app.runner.Run(ctx, Command{
 		Path: githubCLIPath,
 		Args: []string{
@@ -135,8 +140,11 @@ func (app App) runProjects(ctx context.Context, githubCLIPath string, query stri
 		return projectFailureFeed(false)
 	}
 	cacheAvailable := false
-	if app.lists != nil {
-		cacheAvailable = app.lists.StoreProjects(normalizedProjects) == nil
+	if app.lists != nil && app.cacheAccountStillCurrent(cacheAccount) {
+		cacheAvailable = app.lists.StoreProjects(
+			*cacheAccount,
+			normalizedProjects,
+		) == nil
 	}
 
 	return app.projectFeed(normalizedProjects, query, cacheAvailable)

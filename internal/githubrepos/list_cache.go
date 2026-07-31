@@ -12,19 +12,22 @@ import (
 )
 
 const (
-	listCacheLifetime       = 60 * time.Second
+	listCacheLifetime       = 5 * time.Minute
 	listCacheDirectory      = "lists"
-	listCacheSchemaVersion  = 1
+	listCacheSchemaVersion  = 2
 	repositoryListCacheName = "repositories.json"
 	projectListCacheName    = "projects.json"
 )
 
 // listCacheProvider は検証済みGitHub一覧の短期キャッシュを提供する。
 type listCacheProvider interface {
-	LoadRepositories() ([]repository, bool)
-	StoreRepositories(repositories []repository) error
-	LoadProjects() ([]project, bool)
-	StoreProjects(projects []project) error
+	LoadRepositories(config githubConfigIdentity) ([]repository, bool)
+	StoreRepositories(
+		account githubAccountIdentity,
+		repositories []repository,
+	) error
+	LoadProjects(config githubConfigIdentity) ([]project, bool)
+	StoreProjects(account githubAccountIdentity, projects []project) error
 	Invalidate() error
 }
 
@@ -34,13 +37,15 @@ type listCache struct {
 }
 
 type repositoryListCacheDocument struct {
-	Schema       int          `json:"schema"`
-	Repositories []repository `json:"repositories"`
+	Schema       int                   `json:"schema"`
+	Account      githubAccountIdentity `json:"account"`
+	Repositories []repository          `json:"repositories"`
 }
 
 type projectListCacheDocument struct {
-	Schema   int       `json:"schema"`
-	Projects []project `json:"projects"`
+	Schema   int                   `json:"schema"`
+	Account  githubAccountIdentity `json:"account"`
+	Projects []project             `json:"projects"`
 }
 
 // newEnvironmentListCache はAlfredの専用キャッシュを使用して初期化する。
@@ -56,15 +61,19 @@ func newListCache(rootDirectory string, now func() time.Time) *listCache {
 	}
 }
 
-// LoadRepositories は有効期限内の検証済みリポジトリ一覧を返す。
-func (cache *listCache) LoadRepositories() ([]repository, bool) {
-	if cache == nil {
+// LoadRepositories は現在のGitHubアカウント用リポジトリ一覧を返す。
+func (cache *listCache) LoadRepositories(
+	config githubConfigIdentity,
+) ([]repository, bool) {
+	if cache == nil || !config.valid() {
 		return nil, false
 	}
 
 	var document repositoryListCacheDocument
 	if !cache.load(repositoryListCacheName, &document) ||
-		document.Schema != listCacheSchemaVersion {
+		document.Schema != listCacheSchemaVersion ||
+		!document.Account.valid() ||
+		document.Account.Config != config {
 		cache.invalidateFile(repositoryListCacheName)
 		return nil, false
 	}
@@ -78,8 +87,14 @@ func (cache *listCache) LoadRepositories() ([]repository, bool) {
 	return repositories, true
 }
 
-// StoreRepositories は検証済みリポジトリ一覧を非公開領域へ保存する。
-func (cache *listCache) StoreRepositories(repositories []repository) error {
+// StoreRepositories はアカウント単位の検証済みリポジトリ一覧を保存する。
+func (cache *listCache) StoreRepositories(
+	account githubAccountIdentity,
+	repositories []repository,
+) error {
+	if !account.valid() {
+		return fmt.Errorf("repository cache account is invalid")
+	}
 	normalizedRepositories, validCount := normalizeRepositories(repositories)
 	if validCount != len(repositories) {
 		return fmt.Errorf("repository cache contains invalid entries")
@@ -87,19 +102,24 @@ func (cache *listCache) StoreRepositories(repositories []repository) error {
 
 	return cache.store(repositoryListCacheName, repositoryListCacheDocument{
 		Schema:       listCacheSchemaVersion,
+		Account:      account,
 		Repositories: normalizedRepositories,
 	})
 }
 
-// LoadProjects は有効期限内の検証済みOpen Project一覧を返す。
-func (cache *listCache) LoadProjects() ([]project, bool) {
-	if cache == nil {
+// LoadProjects は現在のGitHubアカウント用Open Project一覧を返す。
+func (cache *listCache) LoadProjects(
+	config githubConfigIdentity,
+) ([]project, bool) {
+	if cache == nil || !config.valid() {
 		return nil, false
 	}
 
 	var document projectListCacheDocument
 	if !cache.load(projectListCacheName, &document) ||
-		document.Schema != listCacheSchemaVersion {
+		document.Schema != listCacheSchemaVersion ||
+		!document.Account.valid() ||
+		document.Account.Config != config {
 		cache.invalidateFile(projectListCacheName)
 		return nil, false
 	}
@@ -114,8 +134,14 @@ func (cache *listCache) LoadProjects() ([]project, bool) {
 	return projects, true
 }
 
-// StoreProjects は検証済みOpen Project一覧を非公開領域へ保存する。
-func (cache *listCache) StoreProjects(projects []project) error {
+// StoreProjects はアカウント単位の検証済みOpen Project一覧を保存する。
+func (cache *listCache) StoreProjects(
+	account githubAccountIdentity,
+	projects []project,
+) error {
+	if !account.valid() {
+		return fmt.Errorf("project cache account is invalid")
+	}
 	normalizedProjects, validCount, openCount := normalizeProjects(projects)
 	if validCount != len(projects) || openCount != len(projects) {
 		return fmt.Errorf("project cache contains invalid entries")
@@ -123,6 +149,7 @@ func (cache *listCache) StoreProjects(projects []project) error {
 
 	return cache.store(projectListCacheName, projectListCacheDocument{
 		Schema:   listCacheSchemaVersion,
+		Account:  account,
 		Projects: normalizedProjects,
 	})
 }

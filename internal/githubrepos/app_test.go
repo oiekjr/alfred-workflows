@@ -76,6 +76,11 @@ func TestAppRunOpensFixedLinksWithoutGitHubCLI(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			runner := &fakeRunner{findErr: errors.New("GitHub CLI must not be resolved")}
 			app := NewApp(runner)
+			configProvider := &fakeGitHubConfigProvider{
+				identity:  testGitHubConfigIdentity(1),
+				available: true,
+			}
+			app.githubConfig = configProvider
 
 			feed := app.Run(context.Background(), testCase.query)
 
@@ -87,14 +92,18 @@ func TestAppRunOpensFixedLinksWithoutGitHubCLI(t *testing.T) {
 			if runner.findCalls != 0 || len(runner.commands) != 0 {
 				t.Fatalf("GitHub CLI calls = find %d, commands %d", runner.findCalls, len(runner.commands))
 			}
+			if configProvider.calls != 0 {
+				t.Fatalf("GitHub config calls = %d, want 0", configProvider.calls)
+			}
 		})
 	}
 }
 
 // TestAppRunUsesRepositoryCacheWithoutGitHubCLI は追加入力がローカル検索だけで完了することを検証する。
 func TestAppRunUsesRepositoryCacheWithoutGitHubCLI(t *testing.T) {
+	configIdentity := testGitHubConfigIdentity(1)
 	cache := newListCache(secureTempDirectory(t), time.Now)
-	if err := cache.StoreRepositories([]repository{
+	if err := cache.StoreRepositories(testGitHubAccountIdentity(configIdentity), []repository{
 		{
 			ID:       1,
 			FullName: "owner/alpha-repository",
@@ -112,6 +121,7 @@ func TestAppRunUsesRepositoryCacheWithoutGitHubCLI(t *testing.T) {
 	app := NewApp(runner)
 	app.lists = cache
 	app.avatars = nil
+	app.githubConfig = &fakeGitHubConfigProvider{identity: configIdentity, available: true}
 
 	feed := app.Run(context.Background(), "PHA-REPO")
 
@@ -125,6 +135,7 @@ func TestAppRunUsesRepositoryCacheWithoutGitHubCLI(t *testing.T) {
 
 // TestAppRunFetchesRepositoriesBeforeLocalFiltering は空入力で取得し1文字からローカル絞り込みすることを検証する。
 func TestAppRunFetchesRepositoriesBeforeLocalFiltering(t *testing.T) {
+	configIdentity := testGitHubConfigIdentity(1)
 	cache := newListCache(secureTempDirectory(t), time.Now)
 	apiOutput := strings.Join([]string{
 		`{"id":1,"full_name":"owner/alpha","html_url":"https://github.com/owner/alpha","private":false,"description":null,"archived":false,"fork":false}`,
@@ -134,6 +145,7 @@ func TestAppRunFetchesRepositoriesBeforeLocalFiltering(t *testing.T) {
 	app := NewApp(runner)
 	app.lists = cache
 	app.avatars = nil
+	app.githubConfig = &fakeGitHubConfigProvider{identity: configIdentity, available: true}
 
 	initialFeed := app.Run(context.Background(), "")
 	oneCharacterFeed := app.Run(context.Background(), "a")
@@ -159,8 +171,9 @@ func TestAppRunFetchesRepositoriesBeforeLocalFiltering(t *testing.T) {
 
 // TestAppRunUsesProjectCacheWithoutGitHubCLI はProjectの追加入力もローカル検索になることを検証する。
 func TestAppRunUsesProjectCacheWithoutGitHubCLI(t *testing.T) {
+	configIdentity := testGitHubConfigIdentity(1)
 	cache := newListCache(secureTempDirectory(t), time.Now)
-	if err := cache.StoreProjects([]project{{
+	if err := cache.StoreProjects(testGitHubAccountIdentity(configIdentity), []project{{
 		ID:      "PVT_1",
 		Number:  1,
 		Title:   "Delivery Roadmap",
@@ -180,6 +193,7 @@ func TestAppRunUsesProjectCacheWithoutGitHubCLI(t *testing.T) {
 	app := NewApp(runner)
 	app.lists = cache
 	app.avatars = nil
+	app.githubConfig = &fakeGitHubConfigProvider{identity: configIdentity, available: true}
 
 	feed := app.Run(context.Background(), "project VERY ROAD")
 
@@ -218,6 +232,7 @@ func TestNormalizedFilterQueryTrimsAndFoldsCase(t *testing.T) {
 
 // TestAppRunCachesFetchedDataWithoutSearchQuery は検索文字列を保存せず次回入力で再利用する。
 func TestAppRunCachesFetchedDataWithoutSearchQuery(t *testing.T) {
+	configIdentity := testGitHubConfigIdentity(1)
 	cache := newListCache(secureTempDirectory(t), time.Now)
 	runner := authenticatedRunner(
 		`{"id":1,"full_name":"owner/repository","html_url":"https://github.com/owner/repository","private":true,"description":null,"archived":false,"fork":false}`,
@@ -225,6 +240,7 @@ func TestAppRunCachesFetchedDataWithoutSearchQuery(t *testing.T) {
 	app := NewApp(runner)
 	app.lists = cache
 	app.avatars = nil
+	app.githubConfig = &fakeGitHubConfigProvider{identity: configIdentity, available: true}
 
 	firstFeed := app.Run(context.Background(), "sensitive-filter-value")
 	secondFeed := app.Run(context.Background(), "POSIT")
@@ -240,15 +256,144 @@ func TestAppRunCachesFetchedDataWithoutSearchQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repository cache: %v", err)
 	}
-	if strings.Contains(string(data), "sensitive-filter-value") {
-		t.Fatal("repository cache contains the Alfred search query")
+	for _, forbiddenValue := range []string{
+		"sensitive-filter-value",
+		"ghp_",
+		"Token scopes",
+		"hosts.yml",
+	} {
+		if strings.Contains(string(data), forbiddenValue) {
+			t.Fatalf("repository cache contains %q: %s", forbiddenValue, data)
+		}
+	}
+	if !strings.Contains(string(data), `"login":"octocat"`) {
+		t.Fatalf("repository cache is not bound to the active login: %s", data)
+	}
+}
+
+// TestAppRunRejectsCacheAfterGitHubAccountSwitch は切替前の非公開一覧を表示しない。
+func TestAppRunRejectsCacheAfterGitHubAccountSwitch(t *testing.T) {
+	firstConfig := testGitHubConfigIdentity(1)
+	secondConfig := testGitHubConfigIdentity(2)
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	if err := cache.StoreRepositories(
+		testGitHubAccountIdentity(firstConfig),
+		[]repository{{
+			ID:       1,
+			FullName: "old-account/private-repository",
+			HTMLURL:  "https://github.com/old-account/private-repository",
+			Private:  true,
+		}},
+	); err != nil {
+		t.Fatalf("store old account cache: %v", err)
+	}
+	runner := readyRunner(
+		CommandResult{Stdout: []byte(authStatusWithAccount("hubot", "repo"))},
+		CommandResult{Stdout: []byte(
+			`{"id":2,"full_name":"new-account/repository","html_url":"https://github.com/new-account/repository","private":true,"description":null,"archived":false,"fork":false}`,
+		)},
+	)
+	app := NewApp(runner)
+	app.lists = cache
+	app.avatars = nil
+	app.githubConfig = &fakeGitHubConfigProvider{
+		identity:  secondConfig,
+		available: true,
+	}
+
+	firstFeed := app.Run(context.Background(), "")
+	secondFeed := app.Run(context.Background(), "new")
+
+	if len(firstFeed.Items) != 1 ||
+		firstFeed.Items[0].Title != "new-account/repository" {
+		t.Fatalf("first items = %#v", firstFeed.Items)
+	}
+	if len(secondFeed.Items) != 1 ||
+		secondFeed.Items[0].Title != "new-account/repository" {
+		t.Fatalf("second items = %#v", secondFeed.Items)
+	}
+	if runner.findCalls != 1 || len(runner.commands) != 3 {
+		t.Fatalf(
+			"GitHub CLI calls = find %d, commands %d, want one new-account fetch",
+			runner.findCalls,
+			len(runner.commands),
+		)
+	}
+
+	data, err := os.ReadFile(cache.path(repositoryListCacheName))
+	if err != nil {
+		t.Fatalf("read replacement cache: %v", err)
+	}
+	if strings.Contains(string(data), "old-account") ||
+		!strings.Contains(string(data), `"login":"hubot"`) {
+		t.Fatalf("replacement cache has wrong account data: %s", data)
+	}
+}
+
+// TestAppRunInvalidatesCacheWithoutAccountConfig は主体を照合できない一覧を削除する。
+func TestAppRunInvalidatesCacheWithoutAccountConfig(t *testing.T) {
+	configIdentity := testGitHubConfigIdentity(1)
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	if err := cache.StoreRepositories(
+		testGitHubAccountIdentity(configIdentity),
+		[]repository{{
+			ID:       1,
+			FullName: "private-owner/private-repository",
+			HTMLURL:  "https://github.com/private-owner/private-repository",
+			Private:  true,
+		}},
+	); err != nil {
+		t.Fatalf("store repository cache: %v", err)
+	}
+	app := NewApp(&fakeRunner{findErr: errors.New("not found")})
+	app.lists = cache
+	app.githubConfig = &fakeGitHubConfigProvider{}
+
+	feed := app.Run(context.Background(), "")
+
+	assertSingleItem(t, feed, "Install GitHub CLI", true, "open")
+	if _, err := os.Lstat(cache.path(repositoryListCacheName)); !os.IsNotExist(err) {
+		t.Fatalf("unverifiable repository cache still exists: %v", err)
+	}
+}
+
+// TestAppRunDoesNotCacheWhenAccountChangesDuringFetch は取得途中の主体変更を検出する。
+func TestAppRunDoesNotCacheWhenAccountChangesDuringFetch(t *testing.T) {
+	firstConfig := testGitHubConfigIdentity(1)
+	secondConfig := testGitHubConfigIdentity(2)
+	cache := newListCache(secureTempDirectory(t), time.Now)
+	runner := authenticatedRunner(
+		`{"id":1,"full_name":"owner/repository","html_url":"https://github.com/owner/repository","private":true,"description":null,"archived":false,"fork":false}`,
+	)
+	app := NewApp(runner)
+	app.lists = cache
+	app.avatars = &fakeAvatarProvider{refreshNeeded: true}
+	app.githubConfig = &fakeGitHubConfigProvider{
+		identities: []githubConfigIdentity{
+			firstConfig,
+			firstConfig,
+			secondConfig,
+		},
+	}
+
+	feed := app.Run(context.Background(), "")
+
+	if len(feed.Items) != 1 || feed.Items[0].Title != "owner/repository" {
+		t.Fatalf("items = %#v", feed.Items)
+	}
+	if feed.NeedsAvatarRefresh() {
+		t.Fatal("uncached feed requested a background avatar refresh")
+	}
+	if _, err := os.Lstat(cache.path(repositoryListCacheName)); !os.IsNotExist(err) {
+		t.Fatalf("repository cache exists after account change: %v", err)
 	}
 }
 
 // TestAppRunRequestsBackgroundAvatarRefresh は画像不足が結果表示を待たせないことを検証する。
 func TestAppRunRequestsBackgroundAvatarRefresh(t *testing.T) {
+	configIdentity := testGitHubConfigIdentity(1)
 	cache := newListCache(secureTempDirectory(t), time.Now)
-	if err := cache.StoreRepositories([]repository{{
+	if err := cache.StoreRepositories(testGitHubAccountIdentity(configIdentity), []repository{{
 		ID:       1,
 		FullName: "owner/repository",
 		HTMLURL:  "https://github.com/owner/repository",
@@ -265,6 +410,7 @@ func TestAppRunRequestsBackgroundAvatarRefresh(t *testing.T) {
 	app := NewApp(&fakeRunner{findErr: errors.New("GitHub CLI must not be resolved")})
 	app.lists = cache
 	app.avatars = avatars
+	app.githubConfig = &fakeGitHubConfigProvider{identity: configIdentity, available: true}
 
 	feed := app.Run(context.Background(), "")
 
@@ -326,7 +472,11 @@ func TestAppRunShowsLoginItemWhenAuthenticationFails(t *testing.T) {
 	if !filepath.IsAbs(string(helperPath)) {
 		t.Fatalf("login helper path = %q, want absolute path", helperPath)
 	}
-	wantArgs := []string{"auth", "status", "--active", "--hostname", "github.com"}
+	wantArgs := []string{
+		"auth", "status",
+		"--active",
+		"--hostname", "github.com",
+	}
 	if !reflect.DeepEqual(runner.commands[1].Args, wantArgs) {
 		t.Fatalf("authentication arguments = %#v, want %#v", runner.commands[1].Args, wantArgs)
 	}
@@ -552,7 +702,7 @@ func TestAppRunRejectsMalformedJSON(t *testing.T) {
 
 // TestAppRunShowsAPITimeoutはAPIタイムアウトの表示を検証する。
 func TestAppRunShowsAPITimeout(t *testing.T) {
-	runner := readyRunner(CommandResult{}, CommandResult{
+	runner := readyRunner(authenticatedStatusResult(), CommandResult{
 		Err:      context.DeadlineExceeded,
 		TimedOut: true,
 	})
@@ -568,7 +718,7 @@ func TestAppRunShowsAPITimeout(t *testing.T) {
 
 // TestAppRunRejectsOversizedOutputはAPI出力上限を超えた場合を検証する。
 func TestAppRunRejectsOversizedOutput(t *testing.T) {
-	runner := readyRunner(CommandResult{}, CommandResult{
+	runner := readyRunner(authenticatedStatusResult(), CommandResult{
 		Stdout:         []byte(`{"id":1}`),
 		StdoutOverflow: true,
 	})
@@ -581,7 +731,7 @@ func TestAppRunRejectsOversizedOutput(t *testing.T) {
 
 // TestAppRunRejectsOversizedErrorOutput はAPI標準エラー出力の上限超過を検証する。
 func TestAppRunRejectsOversizedErrorOutput(t *testing.T) {
-	runner := readyRunner(CommandResult{}, CommandResult{
+	runner := readyRunner(authenticatedStatusResult(), CommandResult{
 		Stderr:         []byte("unexpected output"),
 		StderrOverflow: true,
 	})
@@ -610,7 +760,7 @@ func TestAppRunSkipsNonGitHubURL(t *testing.T) {
 
 // TestAppRunDoesNotExposeCommandErrorは認証情報を含むエラーの非表示を検証する。
 func TestAppRunDoesNotExposeCommandError(t *testing.T) {
-	runner := readyRunner(CommandResult{}, CommandResult{
+	runner := readyRunner(authenticatedStatusResult(), CommandResult{
 		Err:    errors.New("request failed with secret-token"),
 		Stderr: []byte("authorization: secret-token"),
 	})
@@ -641,9 +791,31 @@ func readyRunner(results ...CommandResult) *fakeRunner {
 // authenticatedRunnerは認証済みAPI応答を返す偽Runnerを初期化する。
 func authenticatedRunner(apiOutput string) *fakeRunner {
 	return readyRunner(
-		CommandResult{},
+		authenticatedStatusResult(),
 		CommandResult{Stdout: []byte(apiOutput)},
 	)
+}
+
+// authenticatedStatusResult は認証済みアカウントのテスト用JSONを返す。
+func authenticatedStatusResult() CommandResult {
+	return CommandResult{
+		Stdout: []byte(authStatusWithScopes("repo", "read:org")),
+	}
+}
+
+// authStatusWithAccount は指定アカウントの認証状態出力を組み立てる。
+func authStatusWithAccount(login string, scopes ...string) string {
+	quotedScopes := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		quotedScopes = append(quotedScopes, "'"+scope+"'")
+	}
+
+	return "github.com\n  ✓ Logged in to github.com account " + login +
+		" (/Users/" + login + "/.config/gh/hosts.yml)\n" +
+		"  - Active account: true\n" +
+		"  - Git operations protocol: https\n" +
+		"  - Token: ghp_************************************\n" +
+		"  - Token scopes: " + strings.Join(quotedScopes, ", ") + "\n"
 }
 
 // assertSingleItemは単一候補の主要な属性を検証する。
@@ -673,6 +845,13 @@ type fakeRunner struct {
 	findCalls      int
 }
 
+type fakeGitHubConfigProvider struct {
+	identity   githubConfigIdentity
+	available  bool
+	identities []githubConfigIdentity
+	calls      int
+}
+
 type fakeAvatarProvider struct {
 	paths         map[int64]string
 	owners        []githubOwner
@@ -685,6 +864,38 @@ func (provider *fakeAvatarProvider) Paths(owners []githubOwner) avatarPathResult
 	return avatarPathResult{
 		Paths:         provider.paths,
 		RefreshNeeded: provider.refreshNeeded,
+	}
+}
+
+// CurrentIdentity はテスト用のGitHub CLI設定ファイル同一性を返す。
+func (provider *fakeGitHubConfigProvider) CurrentIdentity() (githubConfigIdentity, bool) {
+	provider.calls++
+	if len(provider.identities) > 0 {
+		index := min(provider.calls-1, len(provider.identities)-1)
+		return provider.identities[index], true
+	}
+
+	return provider.identity, provider.available
+}
+
+// testGitHubConfigIdentity は識別可能なテスト用設定ファイル情報を返す。
+func testGitHubConfigIdentity(seed uint64) githubConfigIdentity {
+	return githubConfigIdentity{
+		Device:               1,
+		Inode:                seed,
+		Size:                 128,
+		ModificationUnixNano: int64(seed) + 1_700_000_000_000_000_000,
+	}
+}
+
+// testGitHubAccountIdentity は指定設定に紐づくテスト用アカウントを返す。
+func testGitHubAccountIdentity(
+	config githubConfigIdentity,
+) githubAccountIdentity {
+	return githubAccountIdentity{
+		Hostname: githubHostname,
+		Login:    "octocat",
+		Config:   config,
 	}
 }
 
