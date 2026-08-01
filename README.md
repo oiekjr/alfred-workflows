@@ -97,7 +97,7 @@ When adding or changing a workflow:
 
 ## Publish GitHub Navigator
 
-Version and publish each workflow independently. The release workflow publishes GitHub Navigator from a versioned tag.
+Version and publish each workflow independently. The release workflow publishes GitHub Navigator when a release-ready change reaches `main` with a version that has not been published.
 
 1. Update `version` in `workflows/github-repositories/info.plist`.
 2. Validate and package the workflow locally:
@@ -107,18 +107,11 @@ Version and publish each workflow independently. The release workflow publishes 
    mise run package
    ```
 
-3. Commit the release-ready changes.
-4. Create and push a tag whose version matches `info.plist`:
+3. Commit the release-ready changes and merge them into `main`.
 
-   ```sh
-   version=0.2.3
-   git tag "github-repositories-v${version}"
-   git push origin "github-repositories-v${version}"
-   ```
+A push to `main` starts the release workflow. If `github-repositories-v<version>` is already published, the workflow exits without publishing another release. Otherwise, a successful run creates that tag and immediately publishes a GitHub Release containing the `.alfredworkflow` artifact and its SHA-256 checksum, and associates a GitHub artifact attestation with the packaged workflow.
 
-Pushing the tag starts the release workflow. A successful run immediately publishes a GitHub Release containing the `.alfredworkflow` artifact and its SHA-256 checksum, and associates a GitHub artifact attestation with the packaged workflow.
-
-The workflow rejects tags that do not use `github-repositories-vMAJOR.MINOR.PATCH` or do not match the workflow version. Executables intended for workflow users remain Universal Binaries and do not require a language runtime or mise on the user's Mac.
+The workflow rejects versions that do not use `MAJOR.MINOR.PATCH`, existing draft releases, and an unpublished matching tag that points to another commit. Executables intended for workflow users remain Universal Binaries and do not require a language runtime or mise on the user's Mac.
 
 ## Report a security issue
 

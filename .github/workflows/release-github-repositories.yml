@@ -2,8 +2,8 @@ name: Release GitHub Navigator
 
 on:
   push:
-    tags:
-      - github-repositories-v*
+    branches:
+      - main
 
 permissions: {}
 
@@ -22,6 +22,8 @@ jobs:
       contents: read
       id-token: write
     outputs:
+      release_needed: ${{ steps.version.outputs.release_needed }}
+      tag_exists: ${{ steps.version.outputs.tag_exists }}
       tag_name: ${{ steps.version.outputs.tag_name }}
       version: ${{ steps.version.outputs.version }}
 
@@ -29,6 +31,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up mise
@@ -37,47 +40,86 @@ jobs:
           version: 2026.7.17
           cache: true
 
-      - name: Validate release version
+      - name: Resolve release version
         id: version
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ ! "$TAG_NAME" =~ ^github-repositories-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            echo "Release tag must use github-repositories-vMAJOR.MINOR.PATCH." >&2
-            exit 1
-          fi
-
-          version="${BASH_REMATCH[1]}"
-          plist_version="$(
+          version="$(
             /usr/libexec/PlistBuddy \
               -c "Print :version" \
               workflows/github-repositories/info.plist
           )"
-          if [[ "$version" != "$plist_version" ]]; then
-            echo "Release tag version does not match info.plist." >&2
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Workflow version must use MAJOR.MINOR.PATCH." >&2
             exit 1
           fi
 
-          printf 'tag_name=%s\n' "$TAG_NAME" >> "$GITHUB_OUTPUT"
+          tag_name="github-repositories-v${version}"
+          release_state="$(
+            gh release list \
+              --limit 1000 \
+              --json isDraft,tagName \
+              --jq ".[] | select(.tagName == \"${tag_name}\") | if .isDraft then \"draft\" else \"published\" end"
+          )"
+
+          case "$release_state" in
+            published)
+              echo "GitHub Release ${tag_name} already exists; skipping publication."
+              release_needed=false
+              tag_exists=true
+              ;;
+            draft)
+              echo "Draft GitHub Release ${tag_name} already exists; resolve it before retrying." >&2
+              exit 1
+              ;;
+            "")
+              if tag_commit="$(git rev-parse --verify "refs/tags/${tag_name}^{commit}" 2>/dev/null)"; then
+                if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+                  echo "Release tag ${tag_name} points to a different commit." >&2
+                  exit 1
+                fi
+
+                tag_exists=true
+              else
+                tag_exists=false
+              fi
+
+              release_needed=true
+              ;;
+            *)
+              echo "Multiple GitHub Releases use tag ${tag_name}." >&2
+              exit 1
+              ;;
+          esac
+
+          printf 'release_needed=%s\n' "$release_needed" >> "$GITHUB_OUTPUT"
+          printf 'tag_exists=%s\n' "$tag_exists" >> "$GITHUB_OUTPUT"
+          printf 'tag_name=%s\n' "$tag_name" >> "$GITHUB_OUTPUT"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
       - name: Run checks
+        if: steps.version.outputs.release_needed == 'true'
         env:
           TMPDIR: ${{ runner.temp }}
         run: mise run check
 
       - name: Package workflow
+        if: steps.version.outputs.release_needed == 'true'
         run: mise run package
 
       - name: Attest workflow artifact
+        if: steps.version.outputs.release_needed == 'true'
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-path: dist/github-repositories-${{ steps.version.outputs.version }}.alfredworkflow
 
       - name: Upload release assets
+        if: steps.version.outputs.release_needed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: github-repositories-release-${{ steps.version.outputs.version }}
@@ -91,6 +133,7 @@ jobs:
   publish:
     name: Publish release
     needs: build
+    if: needs.build.outputs.release_needed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -125,7 +168,9 @@ jobs:
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
+          TAG_EXISTS: ${{ needs.build.outputs.tag_exists }}
           TAG_NAME: ${{ needs.build.outputs.tag_name }}
+          TARGET_SHA: ${{ github.sha }}
           VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
@@ -133,11 +178,19 @@ jobs:
 
           artifact="dist/github-repositories-${VERSION}.alfredworkflow"
           checksum="${artifact}.sha256"
+          release_options=(
+            --generate-notes
+            --title "GitHub Navigator v${VERSION}"
+          )
+
+          if [[ "$TAG_EXISTS" == "true" ]]; then
+            release_options+=(--verify-tag)
+          else
+            release_options+=(--target "$TARGET_SHA")
+          fi
 
           gh release create \
             "$TAG_NAME" \
             "$artifact" \
             "$checksum" \
-            --generate-notes \
-            --title "GitHub Navigator v${VERSION}" \
-            --verify-tag
+            "${release_options[@]}"
