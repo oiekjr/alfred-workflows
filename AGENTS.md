@@ -17,8 +17,8 @@ These instructions apply to the entire repository.
 ## Tooling and dependencies
 
 - Manage language and tool versions with mise.
-- Do not add a language, toolchain, or external Go dependency without prior agreement.
-- Keep the current Go implementation on the standard library only.
+- Do not add a language, toolchain, or npm dependency without prior agreement.
+- Keep GitHub Navigator on Node.js standard-library modules only.
 
 ## Repository invariants
 

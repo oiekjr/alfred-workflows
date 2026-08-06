@@ -9,9 +9,10 @@ Before installing GitHub Navigator, make sure you have:
 - macOS 13 or later
 - Alfred 5
 - Alfred Powerpack
+- [Node.js](https://nodejs.org/en/download) 22 or later
 - [GitHub CLI](https://cli.github.com/) 2.60.0 or later
 
-Install GitHub CLI in a standard Homebrew or MacPorts location. The fixed Issues and Pull requests links work even when GitHub CLI is missing or not authenticated.
+Install Node.js and GitHub CLI in standard Homebrew, MacPorts, or `/usr/local` locations. The fixed Issues and Pull requests links work even when GitHub CLI is missing or not authenticated.
 
 ## Install the workflow
 
@@ -86,6 +87,12 @@ Organization Projects use the Organization avatar, and personal Projects use the
 
 ## Troubleshoot the workflow
 
+If the workflow reports that Node.js is missing or outdated:
+
+1. Install Node.js 22 or later.
+2. Confirm that `node` is installed at `/opt/homebrew/bin/node`, `/usr/local/bin/node`, or `/opt/local/bin/node`.
+3. Retry the Alfred input.
+
 If the workflow reports that GitHub CLI is missing or outdated:
 
 1. Install GitHub CLI 2.60.0 or later with Homebrew or MacPorts.
@@ -98,13 +105,15 @@ If you run `gh auth logout` or `gh auth switch` outside the workflow, retry the 
 
 Missing or unavailable avatars do not prevent repository or Project results from appearing.
 
+GitHub Navigator 0.3.0 and later does not bundle a native Mach-O executable. Alfred passes the packaged `github-repositories` launcher to `/bin/sh`, which then runs the packaged Node.js source. This avoids requiring Apple Developer ID signing or the macOS **Open Anyway** exception for the workflow's own runtime files. Node.js and GitHub CLI remain separate installations governed by their distributors and local macOS policy.
+
 ## Review data handling
 
-After authentication succeeds, the workflow retrieves repository and Project lists with `gh api`. It validates and normalizes the minimum required fields, then stores them in Alfred's private workflow cache for five minutes. Each list is bound to the GitHub.com hostname, active account login, and non-secret identity metadata for the standard GitHub CLI `hosts.yml` file. A changed account configuration, expiry, authentication action, or invalid cache format prevents the list from being reused.
+After an authenticated `gh api` request succeeds, the workflow retrieves repository and Project lists with fixed GraphQL queries. It validates and normalizes the minimum required fields, then stores them in Alfred's private workflow cache for 30 minutes. Each list is bound to the GitHub.com hostname, active account login, and non-secret identity metadata for the standard GitHub CLI `hosts.yml` file. A changed account configuration, expiry, authentication action, or invalid cache format prevents the list from being reused.
 
-While the list cache is valid, the workflow does not launch `gh`; it filters the cached data locally in Go. The search text entered in Alfred is not stored in the cache.
+While the list cache is valid, the workflow does not launch `gh`; it filters the cached data locally in Node.js. The search text entered in Alfred is not stored in the cache.
 
-Projects are retrieved with a fixed GraphQL query. Search text is never added to that query and is matched locally after retrieval.
+Repositories and Projects are retrieved with fixed GraphQL queries. Search text is never added to those queries and is matched locally after retrieval.
 
 Access tokens, GitHub CLI configuration contents, search text, GitHub API error details, and GitHub CLI standard error output are neither cached nor displayed in Alfred.
 
@@ -118,7 +127,7 @@ See the repository-wide [security policy](../../SECURITY.md) for trust boundarie
 
 ## Develop and package the workflow
 
-Run validation, Universal Binary builds, and packaging from the repository root:
+Run validation, source-tree builds, and packaging from the repository root:
 
 ```sh
 mise run check
@@ -134,6 +143,6 @@ dist/github-repositories-<version>.alfredworkflow
 dist/github-repositories-<version>.alfredworkflow.sha256
 ```
 
-The artifact name remains `github-repositories` for compatibility, even though the Alfred display name is GitHub Navigator.
+The launcher name remains `github-repositories` for compatibility, even though the Alfred display name is GitHub Navigator.
 
-Builds disable network access and ignore the parent process's language settings. Packaging validates the ZIP contents, binary architectures, ad hoc code signature, and SHA-256 checksum.
+The runtime uses only Node.js standard-library modules and does not require `npm install`. Builds perform no network access and ignore the parent process's language settings. Packaging validates the exact ZIP contents, fixed file modes, absence of bundled Mach-O files, and SHA-256 checksum.

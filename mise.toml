@@ -1,24 +1,20 @@
 [tools]
-go = "1.26.5"
+node = "24.19.0"
 
-[tasks.format-check]
-description = "Goコードのフォーマットを検査する"
-run = 'test -z "$(gofmt -l .)"'
-
-[tasks.vet]
-description = "Goコードを静的解析する"
-run = "go vet ./..."
+[tasks.source-check]
+description = "Node.jsソースとAlfred定義を検査する"
+run = "node scripts/check-syntax.mjs"
 
 [tasks.test]
-description = "Goの単体テストを実行する"
-run = "go test ./..."
+description = "Node.jsの単体テストを実行する"
+run = "node --test test/*.test.mjs"
 
 [tasks.check]
 description = "すべての検査を実行する"
-depends = ["format-check", "vet", "test"]
+depends = ["source-check", "test"]
 
 [tasks.build]
-description = "macOS Universal Binaryをビルドする"
+description = "Node.jsソース配布ツリーを構築する"
 run = "./scripts/build.sh"
 
 [tasks.package]

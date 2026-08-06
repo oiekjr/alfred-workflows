@@ -4,66 +4,78 @@ set -euo pipefail
 umask 077
 
 readonly_system_path="/usr/bin:/bin:/usr/sbin:/sbin"
-go_version="1.26.5"
+node_version="24.19.0"
 export PATH="$readonly_system_path"
 
 script_directory="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && /bin/pwd -P)"
 project_directory="$(cd -- "$script_directory/.." && /bin/pwd -P)"
+workflow_directory="$project_directory/workflows/github-repositories"
 build_directory="$project_directory/build"
-binary_path="$build_directory/github-repositories"
+output_directory="$build_directory/github-repositories"
+runtime_sources=(
+	app.mjs
+	authentication.mjs
+	avatar.mjs
+	bootstrap.cjs
+	cache.mjs
+	command.mjs
+	domain.mjs
+	main.mjs
+	security.mjs
+)
 
 # run_system は親環境を継承せずmacOS標準ツールを実行する。
 run_system() {
 	/usr/bin/env -i PATH="$readonly_system_path" "$@"
 }
 
-# ensure_owned_directory はsymlinkや他アカウントが書き込める作業先を拒否する。
+# ensure_owned_directory はsymlinkや共有書込を拒否して作業先を用意する。
 ensure_owned_directory() {
-	local path="$1"
+	local directory_path="$1"
 
-	if [[ -L "$path" ]]; then
-		echo "Refusing symbolic-link directory: $path" >&2
+	if [[ -L "$directory_path" ]]; then
+		echo "Refusing symbolic-link directory: $directory_path" >&2
 		exit 1
 	fi
-	if [[ ! -e "$path" ]]; then
-		/bin/mkdir -m 0755 "$path"
+	if [[ ! -e "$directory_path" ]]; then
+		/bin/mkdir -m 0755 "$directory_path"
 	fi
-	if [[ ! -d "$path" || ! -O "$path" ]]; then
-		echo "Build directory must be owned by the current user: $path" >&2
+	if [[ ! -d "$directory_path" || ! -O "$directory_path" ]]; then
+		echo "Build directory must be owned by the current user: $directory_path" >&2
 		exit 1
 	fi
 
 	local mode
-	mode="$(run_system /usr/bin/stat -f '%Lp' "$path")"
+	mode="$(run_system /usr/bin/stat -f '%Lp' "$directory_path")"
 	if (( (8#$mode & 0022) != 0 )); then
-		echo "Build directory must not be group- or other-writable: $path" >&2
+		echo "Build directory must not be group- or other-writable: $directory_path" >&2
 		exit 1
 	fi
 }
 
-# ensure_regular_source はビルド入力のsymlinkと共有書込権限を拒否する。
+# ensure_regular_source は入力ファイルの所有者、種類、共有書込権限を検証する。
 ensure_regular_source() {
-	local path="$1"
+	local source_path="$1"
 
-	if [[ -L "$path" || ! -f "$path" || ! -O "$path" ]]; then
-		echo "Build source must be a current-user-owned regular file: $path" >&2
+	if [[ -L "$source_path" || ! -f "$source_path" || ! -O "$source_path" ]]; then
+		echo "Build source must be a current-user-owned regular file: $source_path" >&2
 		exit 1
 	fi
 
 	local mode
-	mode="$(run_system /usr/bin/stat -f '%Lp' "$path")"
+	mode="$(run_system /usr/bin/stat -f '%Lp' "$source_path")"
 	if (( (8#$mode & 0022) != 0 )); then
-		echo "Build source must not be group- or other-writable: $path" >&2
+		echo "Build source must not be group- or other-writable: $source_path" >&2
 		exit 1
 	fi
 }
 
-# ensure_owned_path はmise導入先の全要素を現在ユーザーだけが変更できるか検証する。
+# ensure_owned_path はmise導入先の祖先をユーザー所有ホームまで検証する。
 ensure_owned_path() {
-	local path="$1"
+	local directory_path="$1"
 	local boundary="$2"
 	local expected_user_id="$3"
-	local current_path="$path"
+	local current_path="$directory_path"
 
 	while true; do
 		if [[ -L "$current_path" || ! -d "$current_path" ]]; then
@@ -94,39 +106,18 @@ ensure_owned_path() {
 }
 
 ensure_owned_directory "$build_directory"
-ensure_regular_source "$project_directory/go.mod"
+ensure_owned_directory "$workflow_directory"
 ensure_regular_source "$project_directory/mise.toml"
-if ! run_system /usr/bin/grep -Fqx "go $go_version" "$project_directory/go.mod" ||
-	! run_system /usr/bin/grep -Fqx "go = \"$go_version\"" "$project_directory/mise.toml"; then
-	echo "Go version pins are inconsistent." >&2
-	exit 1
-fi
+ensure_regular_source "$project_directory/package.json"
+ensure_regular_source "$project_directory/scripts/check-syntax.mjs"
+ensure_regular_source "$workflow_directory/info.plist"
+ensure_regular_source "$workflow_directory/github-repositories"
+for source_name in "${runtime_sources[@]}"; do
+	ensure_regular_source "$workflow_directory/src/$source_name"
+done
 
-current_user_id="$(run_system /usr/bin/id -u)"
-unsafe_source="$(
-	run_system /usr/bin/find \
-		"$project_directory/cmd" \
-		"$project_directory/internal" \
-		\( \
-			-type l \
-			-o \
-			-type f \
-			\( \
-				! -user "$current_user_id" \
-				-o -perm -002 \
-				-o -perm -020 \
-			\) \
-		\) \
-		-print \
-		-quit
-)"
-if [[ -n "$unsafe_source" ]]; then
-	echo "Refusing unsafe build source: $unsafe_source" >&2
-	exit 1
-fi
-
-if [[ -L "$binary_path" || ( -e "$binary_path" && ! -f "$binary_path" ) ]]; then
-	echo "Refusing unsafe build output: $binary_path" >&2
+if ! run_system /usr/bin/grep -Fqx "node = \"$node_version\"" "$project_directory/mise.toml"; then
+	echo "Node.js version pin is inconsistent." >&2
 	exit 1
 fi
 
@@ -140,18 +131,16 @@ if [[ "$record_user_id" != "$current_user_id" ||
 	exit 1
 fi
 
-go_root="$user_home_directory/.local/share/mise/installs/go/$go_version"
-go_path="$go_root/bin/go"
-ensure_owned_path "$(/usr/bin/dirname -- "$go_path")" "$user_home_directory" "$current_user_id"
-if [[ -L "$go_path" || ! -f "$go_path" || ! -x "$go_path" || ! -O "$go_path" ]]; then
-	echo "Run this task through mise with its pinned Go installation." >&2
+node_root="$user_home_directory/.local/share/mise/installs/node/$node_version"
+node_path="$node_root/bin/node"
+ensure_owned_path "$(/usr/bin/dirname -- "$node_path")" "$user_home_directory" "$current_user_id"
+ensure_regular_source "$node_path"
+if [[ ! -x "$node_path" || "$(run_system "$node_path" --version)" != "v$node_version" ]]; then
+	echo "Node.js $node_version managed by mise is required." >&2
 	exit 1
 fi
-ensure_regular_source "$go_path"
-if [[ "$(run_system "$go_path" version)" != "go version go$go_version "* ]]; then
-	echo "Go $go_version managed by mise is required." >&2
-	exit 1
-fi
+
+run_system "$node_path" "$project_directory/scripts/check-syntax.mjs"
 
 temporary_directory="$(run_system /usr/bin/mktemp -d "$build_directory/.build.XXXXXX")"
 case "$temporary_directory" in
@@ -161,68 +150,44 @@ case "$temporary_directory" in
 		exit 1
 		;;
 esac
+staging_directory="$temporary_directory/github-repositories"
 
-# 作業用ディレクトリだけを終了時に削除する。
+# cleanup は検証済み作業用ディレクトリだけを終了時に削除する。
 cleanup() {
 	/bin/rm -rf -- "$temporary_directory"
 }
 trap cleanup EXIT
 
-go_cache="$temporary_directory/go-cache"
-module_cache="$temporary_directory/module-cache"
-arm64_binary="$temporary_directory/github-repositories-arm64"
-x86_64_binary="$temporary_directory/github-repositories-x86_64"
-universal_binary="$temporary_directory/github-repositories"
+/bin/mkdir -m 0755 "$staging_directory"
+/bin/mkdir -m 0755 "$staging_directory/src"
+/bin/cp "$workflow_directory/info.plist" "$staging_directory/info.plist"
+/bin/cp "$workflow_directory/github-repositories" "$staging_directory/github-repositories"
+for source_name in "${runtime_sources[@]}"; do
+	/bin/cp "$workflow_directory/src/$source_name" "$staging_directory/src/$source_name"
+done
+/bin/chmod 0644 "$staging_directory/info.plist"
+/bin/chmod 0644 "$staging_directory/github-repositories"
+for source_name in "${runtime_sources[@]}"; do
+	/bin/chmod 0644 "$staging_directory/src/$source_name"
+done
 
-cd "$project_directory"
+run_system /usr/bin/plutil -lint "$staging_directory/info.plist"
+run_system /bin/sh -n "$staging_directory/github-repositories"
+for source_name in "${runtime_sources[@]}"; do
+	run_system "$node_path" --check "$staging_directory/src/$source_name"
+done
 
-/usr/bin/env -i \
-	PATH="$readonly_system_path" \
-	GOCACHE="$go_cache" \
-	GOMODCACHE="$module_cache" \
-	GOENV=off \
-	GOTOOLCHAIN=local \
-	GOPROXY=off \
-	GOSUMDB=off \
-	GOWORK=off \
-	GOFLAGS="-mod=readonly -buildvcs=false" \
-	CGO_ENABLED=0 \
-	GOOS=darwin \
-	GOARCH=arm64 \
-	"$go_path" build \
-	-trimpath \
-	-ldflags="-s -w" \
-	-o "$arm64_binary" \
-	./cmd/github-repositories
+if [[ -L "$output_directory" ]]; then
+	echo "Refusing symbolic-link build output: $output_directory" >&2
+	exit 1
+fi
+if [[ -e "$output_directory" ]]; then
+	if [[ ! -O "$output_directory" ]]; then
+		echo "Build output must be owned by the current user: $output_directory" >&2
+		exit 1
+	fi
+	/bin/rm -rf -- "$output_directory"
+fi
+/bin/mv "$staging_directory" "$output_directory"
 
-/usr/bin/env -i \
-	PATH="$readonly_system_path" \
-	GOCACHE="$go_cache" \
-	GOMODCACHE="$module_cache" \
-	GOENV=off \
-	GOTOOLCHAIN=local \
-	GOPROXY=off \
-	GOSUMDB=off \
-	GOWORK=off \
-	GOFLAGS="-mod=readonly -buildvcs=false" \
-	CGO_ENABLED=0 \
-	GOOS=darwin \
-	GOARCH=amd64 \
-	"$go_path" build \
-	-trimpath \
-	-ldflags="-s -w" \
-	-o "$x86_64_binary" \
-	./cmd/github-repositories
-
-run_system /usr/bin/lipo -create \
-	"$arm64_binary" \
-	"$x86_64_binary" \
-	-output "$universal_binary"
-/bin/chmod 0755 "$universal_binary"
-run_system /usr/bin/lipo "$universal_binary" -verify_arch arm64 x86_64
-run_system /usr/bin/codesign --force --sign - --timestamp=none "$universal_binary"
-run_system /usr/bin/codesign --verify --strict --verbose=2 "$universal_binary"
-
-/bin/mv -f "$universal_binary" "$binary_path"
-
-echo "$binary_path"
+echo "$output_directory"

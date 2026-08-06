@@ -1,0 +1,24 @@
+#!/bin/sh
+
+workflow_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || exit 1
+node_path=""
+
+for candidate in /opt/homebrew/bin/node /usr/local/bin/node /opt/local/bin/node; do
+  if [ -x "$candidate" ]; then
+    node_path=$candidate
+    break
+  fi
+done
+
+if [ -z "$node_path" ]; then
+  /usr/bin/printf '%s' '{"items":[{"title":"Install Node.js 22 or later","subtitle":"Node.js is required to run GitHub Navigator.","arg":"https://nodejs.org/en/download","quicklookurl":"https://nodejs.org/en/download","valid":true,"variables":{"action":"open"}}]}'
+  exit 0
+fi
+
+workflow_cache=${alfred_workflow_cache-}
+exec /usr/bin/env -i \
+  HOME="${HOME-}" \
+  PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+  LC_ALL=C \
+  alfred_workflow_cache="$workflow_cache" \
+  "$node_path" "$workflow_directory/src/bootstrap.cjs" "$@"

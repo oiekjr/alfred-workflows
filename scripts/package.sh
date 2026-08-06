@@ -8,96 +8,90 @@ export PATH="$readonly_system_path"
 
 script_directory="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && /bin/pwd -P)"
 project_directory="$(cd -- "$script_directory/.." && /bin/pwd -P)"
-workflow_directory="$project_directory/workflows/github-repositories"
-plist_path="$workflow_directory/info.plist"
-binary_path="$project_directory/build/github-repositories"
+build_directory="$project_directory/build/github-repositories"
 dist_directory="$project_directory/dist"
+runtime_entries=(
+	info.plist
+	github-repositories
+	src/app.mjs
+	src/authentication.mjs
+	src/avatar.mjs
+	src/bootstrap.cjs
+	src/cache.mjs
+	src/command.mjs
+	src/domain.mjs
+	src/main.mjs
+	src/security.mjs
+)
 
 # run_system は親環境を継承せずmacOS標準ツールを実行する。
 run_system() {
 	/usr/bin/env -i PATH="$readonly_system_path" "$@"
 }
 
-# validate_owned_directory はsymlinkや他アカウントが書き込めるディレクトリを拒否する。
+# validate_owned_directory は出力先の所有者、種類、共有書込権限を検証する。
 validate_owned_directory() {
-	local path="$1"
+	local directory_path="$1"
 
-	if [[ -L "$path" ]]; then
-		echo "Refusing symbolic-link directory: $path" >&2
+	if [[ -L "$directory_path" || ! -d "$directory_path" || ! -O "$directory_path" ]]; then
+		echo "Package directory must be a current-user-owned directory: $directory_path" >&2
 		exit 1
 	fi
-	if [[ ! -d "$path" || ! -O "$path" ]]; then
-		echo "Package directory must be owned by the current user: $path" >&2
-		exit 1
-	fi
-
 	local mode
-	mode="$(run_system /usr/bin/stat -f '%Lp' "$path")"
+	mode="$(run_system /usr/bin/stat -f '%Lp' "$directory_path")"
 	if (( (8#$mode & 0022) != 0 )); then
-		echo "Package directory must not be group- or other-writable: $path" >&2
+		echo "Package directory must not be group- or other-writable: $directory_path" >&2
 		exit 1
 	fi
 }
 
 # ensure_owned_directory は検証可能な出力先を用意する。
 ensure_owned_directory() {
-	local path="$1"
+	local directory_path="$1"
 
-	if [[ ! -e "$path" && ! -L "$path" ]]; then
-		/bin/mkdir -m 0755 "$path"
+	if [[ ! -e "$directory_path" && ! -L "$directory_path" ]]; then
+		/bin/mkdir -m 0755 "$directory_path"
 	fi
-	validate_owned_directory "$path"
+	validate_owned_directory "$directory_path"
 }
 
-# ensure_regular_input はパッケージ入力のsymlinkと共有書込権限を拒否する。
-ensure_regular_input() {
-	local path="$1"
-	local expected_parent="$2"
+# validate_runtime_file は配布入力が固定ツリー内の通常ファイルか検証する。
+validate_runtime_file() {
+	local relative_path="$1"
+	local input_path="$build_directory/$relative_path"
 
-	if [[ -L "$path" || ! -f "$path" || ! -O "$path" ]]; then
-		echo "Package input must be a current-user-owned regular file: $path" >&2
+	if [[ -L "$input_path" || ! -f "$input_path" || ! -O "$input_path" ]]; then
+		echo "Package input must be a current-user-owned regular file: $input_path" >&2
 		exit 1
 	fi
-	local physical_parent
-	physical_parent="$(
-		cd -- "$(/usr/bin/dirname -- "$path")"
-		/bin/pwd -P
-	)"
-	if [[ "$physical_parent" != "$expected_parent" ]]; then
-		echo "Package input resolves through an unexpected directory: $path" >&2
-		exit 1
-	fi
-
 	local mode
-	mode="$(run_system /usr/bin/stat -f '%Lp' "$path")"
-	if (( (8#$mode & 0022) != 0 )); then
-		echo "Package input must not be group- or other-writable: $path" >&2
+	mode="$(run_system /usr/bin/stat -f '%Lp' "$input_path")"
+	if [[ "$mode" != "644" ]]; then
+		echo "Package runtime file must use mode 0644: $input_path" >&2
+		exit 1
+	fi
+	if [[ "$(run_system /usr/bin/file -b "$input_path")" == Mach-O* ]]; then
+		echo "Native Mach-O files are not allowed in the workflow package: $input_path" >&2
 		exit 1
 	fi
 }
 
-validate_owned_directory "$workflow_directory"
-validate_owned_directory "$project_directory/build"
+validate_owned_directory "$build_directory"
+validate_owned_directory "$build_directory/src"
 ensure_owned_directory "$dist_directory"
-ensure_regular_input "$plist_path" "$project_directory/workflows/github-repositories"
-ensure_regular_input "$binary_path" "$project_directory/build"
+for relative_path in "${runtime_entries[@]}"; do
+	validate_runtime_file "$relative_path"
+done
 
-if [[ ! -x "$binary_path" ]]; then
-	echo "Run the build task before packaging." >&2
-	exit 1
-fi
-
-run_system /usr/bin/plutil -lint "$plist_path"
-run_system /usr/bin/lipo "$binary_path" -verify_arch arm64 x86_64
-run_system /usr/bin/codesign --verify --strict --verbose=2 "$binary_path"
-
-bundle_identifier="$(run_system /usr/bin/plutil -extract bundleid raw -o - "$plist_path")"
+run_system /usr/bin/plutil -lint "$build_directory/info.plist"
+run_system /bin/sh -n "$build_directory/github-repositories"
+bundle_identifier="$(run_system /usr/bin/plutil -extract bundleid raw -o - "$build_directory/info.plist")"
 if [[ "$bundle_identifier" != "com.oiekjr.alfred.github-repositories" ]]; then
 	echo "Unexpected workflow bundle identifier." >&2
 	exit 1
 fi
 
-version="$(run_system /usr/bin/plutil -extract version raw -o - "$plist_path")"
+version="$(run_system /usr/bin/plutil -extract version raw -o - "$build_directory/info.plist")"
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 	echo "Workflow version must use MAJOR.MINOR.PATCH." >&2
 	exit 1
@@ -107,7 +101,6 @@ artifact_name="github-repositories-$version.alfredworkflow"
 checksum_name="$artifact_name.sha256"
 artifact_path="$dist_directory/$artifact_name"
 checksum_path="$dist_directory/$checksum_name"
-
 for output_path in "$artifact_path" "$checksum_path"; do
 	if [[ -L "$output_path" || ( -e "$output_path" && ! -f "$output_path" ) ]]; then
 		echo "Refusing unsafe package output: $output_path" >&2
@@ -123,33 +116,24 @@ case "$temporary_directory" in
 		exit 1
 		;;
 esac
-staging_directory="$temporary_directory/workflow"
 temporary_artifact="$temporary_directory/$artifact_name"
 temporary_checksum="$temporary_directory/$checksum_name"
 
-# 作業用ディレクトリだけを終了時に削除する。
+# cleanup は検証済み作業用ディレクトリだけを終了時に削除する。
 cleanup() {
 	/bin/rm -rf -- "$temporary_directory"
 }
 trap cleanup EXIT
 
-/bin/mkdir -m 0700 "$staging_directory"
-/bin/cp "$plist_path" "$staging_directory/info.plist"
-/bin/cp "$binary_path" "$staging_directory/github-repositories"
-/bin/chmod 0644 "$staging_directory/info.plist"
-/bin/chmod 0755 "$staging_directory/github-repositories"
-
-run_system /usr/bin/plutil -lint "$staging_directory/info.plist"
-run_system /usr/bin/codesign --verify --strict --verbose=2 "$staging_directory/github-repositories"
-
 (
-	cd "$staging_directory"
-	run_system /usr/bin/zip -X -q "$temporary_artifact" info.plist github-repositories
+	cd "$build_directory"
+	run_system /usr/bin/zip -X -q "$temporary_artifact" "${runtime_entries[@]}"
 )
-
 run_system /usr/bin/unzip -tq "$temporary_artifact"
+
 archive_entries="$(run_system /usr/bin/unzip -Z1 "$temporary_artifact")"
-if [[ "$archive_entries" != $'info.plist\ngithub-repositories' ]]; then
+expected_entries="$(/usr/bin/printf '%s\n' "${runtime_entries[@]}")"
+if [[ "$archive_entries" != "$expected_entries" ]]; then
 	echo "Package contains unexpected entries." >&2
 	exit 1
 fi
@@ -162,7 +146,6 @@ fi
 
 /bin/mv -f "$temporary_artifact" "$artifact_path"
 /bin/mv -f "$temporary_checksum" "$checksum_path"
-
 (
 	cd "$dist_directory"
 	run_system /usr/bin/shasum -a 256 -c "$checksum_name"

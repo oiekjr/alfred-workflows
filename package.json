@@ -1,0 +1,12 @@
+{
+  "name": "alfred-workflows",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check:syntax": "node scripts/check-syntax.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

@@ -41,7 +41,7 @@ Language and tool versions are managed with [mise](https://mise.jdx.dev/).
 
 3. Put developer-specific overrides in `mise.local.toml`. This file is excluded from Git.
 
-The current repository uses Go to build self-contained executables, so workflow users do not need Go or mise.
+The current repository uses Node.js source modules without npm dependencies. Workflow users need Node.js 22 or later, but they do not need mise or repository development tools.
 
 ## Validate changes
 
@@ -55,7 +55,7 @@ GitHub Actions runs the same task for pull requests and pushes to `main`.
 
 ## Build a workflow
 
-Build the current workflow executable as a macOS Universal Binary:
+Build the validated source distribution tree:
 
 ```sh
 mise run build
@@ -82,14 +82,14 @@ dist/github-repositories-<version>.alfredworkflow
 dist/github-repositories-<version>.alfredworkflow.sha256
 ```
 
-The package task validates the workflow property list, binary architectures, ad hoc code signature, ZIP contents, and SHA-256 checksum.
+The package task validates the workflow property list, source file permissions, absence of bundled Mach-O executables, ZIP contents, and SHA-256 checksum.
 
 ## Add or maintain a workflow
 
 When adding or changing a workflow:
 
 1. Give it a short, stable identifier.
-2. Keep its executable entry point under `cmd/`, internal implementation under `internal/`, Alfred definition under `workflows/`, and development automation under `scripts/`.
+2. Keep its Alfred definition, launcher, and runtime source under its own `workflows/` directory, and keep shared development automation under `scripts/`.
 3. Keep each workflow's definition, implementation, documentation, version, and artifact independent from other workflows.
 4. Document workflow-specific requirements and constraints in that workflow's README.
 5. Pin any approved language or toolchain version with mise.
@@ -111,7 +111,7 @@ Version and publish each workflow independently. The release workflow publishes 
 
 A push to `main` starts the release workflow. If `github-repositories-v<version>` is already published, the workflow exits without publishing another release. Otherwise, a successful run creates that tag and immediately publishes a GitHub Release containing the `.alfredworkflow` artifact and its SHA-256 checksum, and associates a GitHub artifact attestation with the packaged workflow.
 
-The workflow rejects versions that do not use `MAJOR.MINOR.PATCH`, existing draft releases, and an unpublished matching tag that points to another commit. Executables intended for workflow users remain Universal Binaries and do not require a language runtime or mise on the user's Mac.
+The workflow rejects versions that do not use `MAJOR.MINOR.PATCH`, existing draft releases, and an unpublished matching tag that points to another commit. GitHub Navigator is distributed as interpreted source rather than a bundled native executable; users need Node.js 22 or later but do not need mise.
 
 ## Report a security issue
 

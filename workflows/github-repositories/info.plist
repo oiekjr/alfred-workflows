@@ -140,7 +140,7 @@
 				<key>runningsubtext</key>
 				<string>Loading GitHub results…</string>
 				<key>script</key>
-				<string>./github-repositories "$1"</string>
+				<string>/bin/sh ./github-repositories "$1"</string>
 				<key>scriptargtype</key>
 				<integer>1</integer>
 				<key>scriptfile</key>
@@ -224,7 +224,7 @@
 				<key>escaping</key>
 				<integer>0</integer>
 				<key>script</key>
-				<string>helper_path="$(/usr/bin/printf '%s' '{var:login_helper}' | /usr/bin/base64 -D)" &amp;&amp; "$helper_path" --authentication-helper login</string>
+				<string>helper_path="$(/usr/bin/printf '%s' '{var:login_helper}' | /usr/bin/base64 -D)" &amp;&amp; /bin/sh "$helper_path" --authentication-helper login</string>
 			</dict>
 			<key>type</key>
 			<string>alfred.workflow.action.terminalcommand</string>
@@ -258,7 +258,7 @@
 				<key>escaping</key>
 				<integer>0</integer>
 				<key>script</key>
-				<string>helper_path="$(/usr/bin/printf '%s' '{var:login_helper}' | /usr/bin/base64 -D)" &amp;&amp; "$helper_path" --authentication-helper login-projects</string>
+				<string>helper_path="$(/usr/bin/printf '%s' '{var:login_helper}' | /usr/bin/base64 -D)" &amp;&amp; /bin/sh "$helper_path" --authentication-helper login-projects</string>
 			</dict>
 			<key>type</key>
 			<string>alfred.workflow.action.terminalcommand</string>
@@ -292,7 +292,7 @@
 				<key>escaping</key>
 				<integer>0</integer>
 				<key>script</key>
-				<string>helper_path="$(/usr/bin/printf '%s' '{var:login_helper}' | /usr/bin/base64 -D)" &amp;&amp; "$helper_path" --authentication-helper authorize-projects</string>
+				<string>helper_path="$(/usr/bin/printf '%s' '{var:login_helper}' | /usr/bin/base64 -D)" &amp;&amp; /bin/sh "$helper_path" --authentication-helper authorize-projects</string>
 			</dict>
 			<key>type</key>
 			<string>alfred.workflow.action.terminalcommand</string>
@@ -310,10 +310,11 @@
 • gh pr / gh prs: open GitHub Pull requests
 • gh project / gh projects [&lt;text&gt;]: list or search accessible open Projects
 
-Validated repository and Project lists are bound to the active GitHub account and cached privately for five minutes, so additional typing is filtered locally from the first query character. An account switch invalidates the matching list cache before use. The initial request runs immediately; later input waits 300 ms after the last character. Owner avatars are refreshed in the background and cached privately for seven days.
+Validated repository and Project lists are bound to the active GitHub account and cached privately for 30 minutes, so additional typing is filtered locally from the first query character. An account switch invalidates the matching list cache before use. The initial request runs immediately; later input waits 300 ms after the last character. Owner avatars are refreshed in the background and cached privately for seven days.
 
 Requirements:
 • Alfred 5 with Powerpack
+• Node.js 22 or later in a standard Homebrew or MacPorts location
 • GitHub CLI 2.60.0 or later
 • An authenticated GitHub.com account
 
@@ -389,7 +390,7 @@ If authentication or read-only Projects access is required, select the displayed
 	<key>variablesdontexport</key>
 	<array/>
 	<key>version</key>
-	<string>0.2.2</string>
+	<string>0.3.1</string>
 	<key>webaddress</key>
 	<string>https://github.com/oiekjr/alfred-workflows</string>
 </dict>
