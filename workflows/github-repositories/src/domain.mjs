@@ -23,6 +23,7 @@ export const REPOSITORY_GRAPHQL_QUERY = `query($endCursor: String) {
       first: 100
       after: $endCursor
       affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]
+      ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]
     ) {
       nodes {
         databaseId

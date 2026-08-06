@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  REPOSITORY_GRAPHQL_QUERY,
   avatarOwnerIDFromURL,
   filterProjects,
   filterRepositories,
@@ -19,6 +20,17 @@ import {
   supportedGitHubCLIVersion,
 } from "../workflows/github-repositories/src/domain.mjs";
 import { testProject, testRepository } from "./helpers.mjs";
+
+test("repository GraphQL query includes every viewer and owner affiliation", () => {
+  assert.match(
+    REPOSITORY_GRAPHQL_QUERY,
+    /^\s+affiliations: \[OWNER, COLLABORATOR, ORGANIZATION_MEMBER\]$/mu,
+  );
+  assert.match(
+    REPOSITORY_GRAPHQL_QUERY,
+    /^\s+ownerAffiliations: \[OWNER, COLLABORATOR, ORGANIZATION_MEMBER\]$/mu,
+  );
+});
 
 test("routeInput classifies exact fixed commands and project queries", () => {
   assert.deepEqual(routeInput(" issues "), { mode: "issues", query: "" });
