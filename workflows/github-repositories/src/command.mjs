@@ -173,7 +173,7 @@ export async function runBoundedCommand(command, environment) {
       const result = appendBoundedChunk(
         stdoutChunks,
         stdoutBytes,
-        Buffer.from(chunk),
+        chunk,
         command.stdoutLimit,
       );
       stdoutBytes = result.bytes;
@@ -186,7 +186,7 @@ export async function runBoundedCommand(command, environment) {
       const result = appendBoundedChunk(
         stderrChunks,
         stderrBytes,
-        Buffer.from(chunk),
+        chunk,
         command.stderrLimit,
       );
       stderrBytes = result.bytes;
@@ -643,7 +643,7 @@ function appendBoundedChunk(chunks, currentBytes, chunk, limit) {
   const remainingBytes = Math.max(limit - currentBytes, 0);
   const writeBytes = Math.min(remainingBytes, chunk.length);
   if (writeBytes > 0) {
-    chunks.push(Buffer.from(chunk.subarray(0, writeBytes)));
+    chunks.push(chunk.subarray(0, writeBytes));
   }
 
   return {

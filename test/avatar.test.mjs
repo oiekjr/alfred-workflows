@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { lstatSync, utimesSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import https from "node:https";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 import {
   AvatarCache,
   acquireAvatarRefreshLock,
+  downloadAvatar,
   inspectAvatarImage,
   isBackgroundHelperInvocation,
   releaseAvatarRefreshLock,
@@ -131,6 +135,91 @@ test("avatar refresh bounds total downloads and concurrency", async (context) =>
 
   assert.equal(downloads, 24);
   assert.ok(maximumActive <= 4);
+});
+
+test("avatar selection stops inspecting owners once the download budget is full", async (context) => {
+  const root = managedTemporaryDirectory(context);
+  const selected = [];
+  const cache = new AvatarCache(root, async (_url, id) => {
+    selected.push(id);
+    return { data: testPNG(), extension: "png" };
+  });
+  const owners = Array.from({ length: 100 }, (_, index) => owner(index + 1));
+  let inspections = 0;
+  const originalCachedFile = cache.cachedFile.bind(cache);
+  cache.cachedFile = (id) => {
+    inspections += 1;
+    return originalCachedFile(id);
+  };
+
+  await cache.refresh(owners);
+
+  assert.deepEqual(selected, Array.from({ length: 24 }, (_, index) => index + 1));
+  // 更新上限到達後のファイル参照を防ぐ性能上の契約を検証する
+  assert.equal(inspections, 24);
+});
+
+test("avatar budget excludes duplicates, invalid URLs, and fresh images", async (context) => {
+  const root = managedTemporaryDirectory(context);
+  const selected = [];
+  const cache = new AvatarCache(root, async (_url, id) => {
+    selected.push(id);
+    return { data: testPNG(), extension: "png" };
+  });
+  await cache.refreshOwner(owner(1));
+  selected.length = 0;
+  const owners = [
+    owner(1),
+    { ...owner(2), avatar_url: "https://example.com/u/2" },
+    owner(3),
+    owner(3),
+    ...Array.from({ length: 30 }, (_, index) => owner(index + 4)),
+  ];
+
+  await cache.refresh(owners);
+
+  assert.deepEqual(selected, Array.from({ length: 24 }, (_, index) => index + 3));
+});
+
+test("avatar download preserves image bytes across response chunks", async (context) => {
+  const image = testPNG();
+  context.mock.method(https, "get", (_url, _options, onResponse) => {
+    const request = new EventEmitter();
+    queueMicrotask(() => {
+      const response = new PassThrough();
+      response.statusCode = 200;
+      response.headers = { "content-length": String(image.length) };
+      onResponse(response);
+      response.write(image.subarray(0, 17));
+      response.end(image.subarray(17));
+    });
+    return request;
+  });
+
+  const result = await downloadAvatar("https://avatars.githubusercontent.com/u/10?s=128", 10);
+
+  assert.equal(result.extension, "png");
+  assert.deepEqual(result.data, image);
+});
+
+test("avatar download rejects oversized streamed bodies without Content-Length", async (context) => {
+  context.mock.method(https, "get", (_url, _options, onResponse) => {
+    const request = new EventEmitter();
+    queueMicrotask(() => {
+      const response = new PassThrough();
+      response.statusCode = 200;
+      response.headers = {};
+      onResponse(response);
+      response.write(Buffer.alloc(2 * 1024 * 1024));
+      response.end(Buffer.from([0]));
+    });
+    return request;
+  });
+
+  await assert.rejects(
+    () => downloadAvatar("https://avatars.githubusercontent.com/u/10?s=128", 10),
+    /size limit/u,
+  );
 });
 
 test("avatar refresh lock prevents concurrent helpers", (context) => {

@@ -80,6 +80,82 @@ test("repository normalization rejects unsafe URLs and sorts stable names", () =
   assert.equal(result.values[0].description, "first repository");
 });
 
+test("repository ordering preserves case ties and duplicate stability", () => {
+  const repositories = ["owner/zeta", "owner/alpha", "Owner/Alpha", "owner/alpha"]
+    .map((fullName, index) => testRepository({
+      id: index + 1,
+      full_name: fullName,
+      html_url: `https://github.com/${fullName}`,
+    }));
+  const original = structuredClone(repositories);
+
+  const result = normalizeRepositories(repositories);
+
+  assert.deepEqual(result.values.map((repository) => repository.id), [3, 2, 4, 1]);
+  assert.deepEqual(normalizeRepositories(result.values).values.map((repository) => repository.id), [3, 2, 4, 1]);
+  assert.deepEqual(repositories, original);
+  assert.deepEqual(Object.keys(result.values[0]).sort(), Object.keys(testRepository()).sort());
+});
+
+test("project ordering preserves folded owner, Unicode title, number, and stable ties", () => {
+  const projects = [
+    ["Zulu", "Alpha", 1],
+    ["Alpha", "Équipe", 2],
+    ["alpha", "équipe", 1],
+    ["alpha", "Alpha", 9],
+    ["ALPHA", "ÉQUIPE", 1],
+  ].map(([login, title, number], index) => testProject({
+    id: `PVT_${index}`,
+    number,
+    title,
+    html_url: `https://github.com/orgs/${login}/projects/${number}`,
+    owner: { ...testProject().owner, login },
+  }));
+  const original = structuredClone(projects);
+
+  const result = normalizeProjects(projects);
+
+  assert.deepEqual(result.values.map((project) => project.id), ["PVT_3", "PVT_2", "PVT_4", "PVT_1", "PVT_0"]);
+  assert.deepEqual(normalizeProjects(result.values).values.map((project) => project.id), ["PVT_3", "PVT_2", "PVT_4", "PVT_1", "PVT_0"]);
+  assert.deepEqual(projects, original);
+  assert.deepEqual(Object.keys(result.values[0]).sort(), Object.keys(testProject()).sort());
+});
+
+for (const logins of [["alpha", "beta", "gamma"], ["gamma", "alpha", "beta"]]) {
+  test(`projects in ${logins.join(",")} order avoid folding titles when owners determine the order`, (context) => {
+    const title = "İ".repeat(480);
+    const projects = logins.map((login, index) => testProject({
+      id: `PVT_${index + 1}`,
+      title,
+      html_url: `https://github.com/orgs/${login}/projects/1`,
+      owner: { ...testProject().owner, id: index + 1, node_id: `O_${index + 1}`, login },
+    }));
+    const originalLowercase = String.prototype.toLowerCase;
+    let titleFolds = 0;
+    context.mock.method(String.prototype, "toLowerCase", countedLowercase);
+
+    const result = normalizeProjects(projects);
+
+    assert.deepEqual(result.values.map((project) => project.owner.login), ["alpha", "beta", "gamma"]);
+    assert.deepEqual(result.values.map((project) => project.title), [title, title, title]);
+    // 所有者名で順序が確定する場合の不要な文字列変換を防ぐ
+    assert.equal(titleFolds, 0);
+
+    /**
+     * 対象タイトルの小文字化回数を記録する。
+     *
+     * @this {string}
+     * @returns {string} 元の小文字化処理の結果
+     */
+    function countedLowercase() {
+      if (String(this) === title) {
+        titleFolds += 1;
+      }
+      return originalLowercase.call(this);
+    }
+  });
+}
+
 test("repository page parsing joins pages and derives owner IDs", () => {
   const first = testRepository({
     owner: {
@@ -122,6 +198,64 @@ test("repository page parsing rejects account changes", () => {
     () => parseRepositoryPages(output),
     /account changed/u,
   );
+});
+
+test("owner derivation retains explicit IDs and validates each distinct URL", () => {
+  const projects = [
+    testProject({ owner: { ...testProject().owner, id: undefined } }),
+    testProject({ owner: { ...testProject().owner, id: 21 } }),
+    testProject({ owner: { ...testProject().owner, id: undefined, avatar_url: "https://example.com/u/20" } }),
+    testProject({ owner: { ...testProject().owner, id: undefined, avatar_url: "https://avatars.githubusercontent.com/u/21?v=4" } }),
+  ];
+
+  const parsedProjects = parseProjects(projects.map((project) => JSON.stringify(project)).join("\n"));
+  const parsedRepositories = parseRepositoryPages(JSON.stringify({ login: "owner", repositories: projects }));
+
+  assert.deepEqual(parsedProjects.map((project) => project.owner.id), [20, 21, undefined, 21]);
+  assert.deepEqual(parsedRepositories.repositories.map((repository) => repository.owner.id), [20, 21, undefined, 21]);
+});
+
+test("owner derivation does not carry URL results into subsequent responses", () => {
+  const output = JSON.stringify({ ...testProject(), owner: { ...testProject().owner, id: undefined } });
+  const first = parseProjects(output);
+  first[0].owner.id = 999;
+
+  const second = parseProjects(output);
+
+  assert.equal(second[0].owner.id, 20);
+});
+
+test("JSON line parsing retains whitespace and CRLF handling", () => {
+  const project = testProject();
+  const projectOutput = ` \r\n${JSON.stringify(project)}\r\n${JSON.stringify(project)}\r\n `;
+  const page = JSON.stringify({ login: "Owner", repositories: [testRepository()] });
+
+  assert.deepEqual(parseProjects(projectOutput), [project, project]);
+  assert.deepEqual(parseRepositoryPages(` \r\n${page}\r\n `), {
+    login: "owner",
+    repositories: [testRepository()],
+  });
+});
+
+test("JSON line parsing preserves empty response behavior", () => {
+  assert.deepEqual(parseProjects(" \r\n\t"), []);
+  assert.throws(() => parseRepositoryPages(" \r\n\t"), /no pages/u);
+});
+
+test("JSON line parsing rejects blank lines between valid entries", () => {
+  const project = JSON.stringify(testProject());
+  const page = JSON.stringify({ login: "owner", repositories: [] });
+
+  assert.throws(() => parseProjects(`${project}\n\n${project}`), SyntaxError);
+  assert.throws(() => parseRepositoryPages(`${page}\n\n${page}`), SyntaxError);
+});
+
+test("JSON line parsing rejects malformed later entries without returning partial results", () => {
+  const project = JSON.stringify(testProject());
+  const page = JSON.stringify({ login: "owner", repositories: [] });
+
+  assert.throws(() => parseProjects(`${project}\ninvalid`), SyntaxError);
+  assert.throws(() => parseRepositoryPages(`${page}\ninvalid`), SyntaxError);
 });
 
 test("repository filtering and items remain local and validated", () => {
@@ -208,6 +342,24 @@ test("avatar URLs bind an approved host path to the owner ID", () => {
   assert.equal(normalizedAvatarURL(source, 21), null);
   assert.equal(avatarOwnerIDFromURL("https://example.com/u/20"), null);
 });
+
+for (const source of [
+  "http://avatars.githubusercontent.com/u/20",
+  "https://example.com/u/20",
+  "https://avatars.githubusercontent.com:444/u/20",
+  "https://user:password@avatars.githubusercontent.com/u/20",
+  "https://avatars.githubusercontent.com/u/20#fragment",
+  "https://avatars.githubusercontent.com/u/020",
+  "https://avatars.githubusercontent.com/u/0",
+  "https://avatars.githubusercontent.com/u/9007199254740992",
+  "https://avatars.githubusercontent.com/u/20/extra",
+  "not-a-url",
+]) {
+  test(`avatar normalization rejects unsafe URL ${source}`, () => {
+    assert.equal(avatarOwnerIDFromURL(source), null);
+    assert.equal(normalizedAvatarURL(source, 20), null);
+  });
+}
 
 test("project scopes accept read or write but reject similar names", () => {
   assert.equal(hasProjectReadScope("'repo', 'read:project'"), true);

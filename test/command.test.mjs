@@ -93,6 +93,43 @@ test("bounded command stops output beyond the configured limit", async () => {
   assert.ok(result.error);
 });
 
+for (const bytes of [65_535, 65_536, 65_537]) {
+  test(`bounded command retains exactly ${bytes} stdout bytes across chunks`, async () => {
+    const result = await runBoundedCommand(
+      {
+        path: process.execPath,
+        args: ["-e", `process.stdout.write(Buffer.alloc(${bytes}, 0x61));`],
+        timeoutMilliseconds: 1_000,
+        stdoutLimit: 65_536,
+        stderrLimit: 16,
+      },
+      { PATH: "/usr/bin:/bin", LC_ALL: "C" },
+    );
+
+    assert.deepEqual(result.stdout, Buffer.alloc(Math.min(bytes, 65_536), 0x61));
+    assert.equal(result.stdoutOverflow, bytes > 65_536);
+    assert.equal(result.error === null, bytes <= 65_536);
+  });
+}
+
+test("bounded command applies an independent stderr limit", async () => {
+  const result = await runBoundedCommand(
+    {
+      path: process.execPath,
+      args: ["-e", "process.stderr.write(Buffer.alloc(65537, 0x62));"],
+      timeoutMilliseconds: 1_000,
+      stdoutLimit: 16,
+      stderrLimit: 65_536,
+    },
+    { PATH: "/usr/bin:/bin", LC_ALL: "C" },
+  );
+
+  assert.deepEqual(result.stderr, Buffer.alloc(65_536, 0x62));
+  assert.equal(result.stderrOverflow, true);
+  assert.equal(result.stdoutOverflow, false);
+  assert.ok(result.error);
+});
+
 test("bounded command terminates a timed-out process group", async () => {
   const result = await runBoundedCommand(
     {

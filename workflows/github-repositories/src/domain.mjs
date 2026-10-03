@@ -235,15 +235,11 @@ export function supportedGitHubCLIVersion(current) {
  * @throws {Error} ページ構造、ログイン名、JSONが不正な場合
  */
 export function parseRepositoryPages(output) {
-  const pages = parseJSONLines(output);
-  if (pages.length === 0) {
-    throw new Error("repository response contains no pages");
-  }
-
   let login = "";
   /** @type {unknown[]} */
   const repositories = [];
-  for (const page of pages) {
+  const ownerIDs = new Map();
+  for (const page of parseJSONLines(output)) {
     if (
       !isRecord(page) ||
       typeof page.login !== "string" ||
@@ -258,7 +254,13 @@ export function parseRepositoryPages(output) {
       throw new Error("repository response account changed between pages");
     }
     login = pageLogin;
-    repositories.push(...page.repositories.map(withDerivedOwnerID));
+    for (const repository of page.repositories) {
+      repositories.push(withDerivedOwnerID(repository, ownerIDs));
+    }
+  }
+
+  if (login === "") {
+    throw new Error("repository response contains no pages");
   }
 
   return { login, repositories };
@@ -296,7 +298,7 @@ export function normalizeRepositories(repositories) {
       continue;
     }
 
-    normalizedRepositories.push({
+    const value = {
       id: candidate.id,
       full_name: candidate.full_name,
       html_url: candidate.html_url,
@@ -311,24 +313,24 @@ export function normalizeRepositories(repositories) {
       archived: candidate.archived,
       fork: candidate.fork,
       owner,
-    });
+    };
+    normalizedRepositories.push(value);
   }
 
-  normalizedRepositories.sort((left, right) => {
-    const leftFolded = left.full_name.toLowerCase();
-    const rightFolded = right.full_name.toLowerCase();
-    if (leftFolded !== rightFolded) {
-      return leftFolded < rightFolded ? -1 : 1;
-    }
-    return left.full_name < right.full_name
-      ? -1
-      : left.full_name === right.full_name
-        ? 0
-        : 1;
-  });
+  if (isOrdered(normalizedRepositories, compareRepositories)) {
+    return { values: normalizedRepositories, validCount: normalizedRepositories.length };
+  }
+
+  const orderedRepositories = normalizedRepositories.map((value) => ({
+    value,
+    foldedName: value.full_name.toLowerCase(),
+  }));
+  orderedRepositories.sort((left, right) =>
+    compareRepositories(left.value, right.value, left.foldedName, right.foldedName),
+  );
 
   return {
-    values: normalizedRepositories,
+    values: orderedRepositories.map((entry) => entry.value),
     validCount: normalizedRepositories.length,
   };
 }
@@ -395,7 +397,12 @@ export function repositoryOwners(repositories) {
  * @throws {Error} JSONが不正な場合
  */
 export function parseProjects(output) {
-  return parseJSONLines(output).map(withDerivedOwnerID);
+  const ownerIDs = new Map();
+  const projects = [];
+  for (const candidate of parseJSONLines(output)) {
+    projects.push(withDerivedOwnerID(candidate, ownerIDs));
+  }
+  return projects;
 }
 
 /**
@@ -455,22 +462,35 @@ export function normalizeProjects(projects) {
     normalizedProjects.push(value);
   }
 
-  normalizedProjects.sort((left, right) => {
-    const leftOwner = left.owner.login.toLowerCase();
-    const rightOwner = right.owner.login.toLowerCase();
-    if (leftOwner !== rightOwner) {
-      return leftOwner < rightOwner ? -1 : 1;
-    }
+  if (isOrdered(normalizedProjects, compareProjects)) {
+    return { values: normalizedProjects, validCount, openCount };
+  }
 
-    const leftTitle = left.title.toLowerCase();
-    const rightTitle = right.title.toLowerCase();
-    if (leftTitle !== rightTitle) {
-      return leftTitle < rightTitle ? -1 : 1;
+  const orderedProjects = normalizedProjects.map((value) => ({
+    value,
+    foldedOwner: value.owner.login.toLowerCase(),
+    foldedTitle: undefined,
+  }));
+  orderedProjects.sort((left, right) => {
+    if (left.foldedOwner === right.foldedOwner) {
+      left.foldedTitle ??= left.value.title.toLowerCase();
+      right.foldedTitle ??= right.value.title.toLowerCase();
     }
-    return left.number - right.number;
+    return compareProjects(
+      left.value,
+      right.value,
+      left.foldedOwner,
+      right.foldedOwner,
+      left.foldedTitle,
+      right.foldedTitle,
+    );
   });
 
-  return { values: normalizedProjects, validCount, openCount };
+  return {
+    values: orderedProjects.map((entry) => entry.value),
+    validCount,
+    openCount,
+  };
 }
 
 /**
@@ -625,16 +645,7 @@ export function isGitHubProjectURL(rawURL, owner, number) {
  */
 export function avatarOwnerIDFromURL(rawURL) {
   try {
-    const parsedURL = new URL(rawURL);
-    if (!isAllowedAvatarURL(parsedURL)) {
-      return null;
-    }
-    const match = parsedURL.pathname.match(/^\/u\/([1-9][0-9]*)$/u);
-    if (!match) {
-      return null;
-    }
-    const ownerID = Number(match[1]);
-    return Number.isSafeInteger(ownerID) && ownerID > 0 ? ownerID : null;
+    return avatarOwnerIDFromParsedURL(new URL(rawURL));
   } catch {
     return null;
   }
@@ -648,14 +659,18 @@ export function avatarOwnerIDFromURL(rawURL) {
  * @returns {string | null} 正規化済みURL
  */
 export function normalizedAvatarURL(rawURL, ownerID) {
-  if (avatarOwnerIDFromURL(rawURL) !== ownerID) {
+  try {
+    const parsedURL = new URL(rawURL);
+    if (avatarOwnerIDFromParsedURL(parsedURL) !== ownerID) {
+      return null;
+    }
+
+    parsedURL.search = "";
+    parsedURL.searchParams.set("s", "128");
+    return parsedURL.toString();
+  } catch {
     return null;
   }
-
-  const parsedURL = new URL(rawURL);
-  parsedURL.search = "";
-  parsedURL.searchParams.set("s", "128");
-  return parsedURL.toString();
 }
 
 /**
@@ -1095,6 +1110,74 @@ function normalizedFilterQuery(query) {
 }
 
 /**
+ * 正規化済み一覧が比較規則に沿って並んでいるか判定する。
+ *
+ * @template T
+ * @param {T[]} values 検証済み一覧
+ * @param {(left: T, right: T) => number} compare 並び順の比較関数
+ * @returns {boolean} 再ソートが不要な場合はtrue
+ */
+function isOrdered(values, compare) {
+  for (let index = 1; index < values.length; index += 1) {
+    if (compare(values[index - 1], values[index]) > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * 大文字小文字を無視した名前と元の名前でリポジトリを比較する。
+ *
+ * @param {Repository} left 比較元
+ * @param {Repository} right 比較先
+ * @param {string} [leftFolded] 計算済みの比較元名
+ * @param {string} [rightFolded] 計算済みの比較先名
+ * @returns {number} 並び順の比較結果
+ */
+function compareRepositories(
+  left,
+  right,
+  leftFolded = left.full_name.toLowerCase(),
+  rightFolded = right.full_name.toLowerCase(),
+) {
+  if (leftFolded !== rightFolded) {
+    return leftFolded < rightFolded ? -1 : 1;
+  }
+  return left.full_name < right.full_name ? -1 : left.full_name === right.full_name ? 0 : 1;
+}
+
+/**
+ * 所有者名、タイトル、番号でProjectを比較する。
+ *
+ * @param {Project} left 比較元
+ * @param {Project} right 比較先
+ * @param {string} [leftOwner] 計算済みの比較元所有者名
+ * @param {string} [rightOwner] 計算済みの比較先所有者名
+ * @param {string} [leftTitle] 計算済みの比較元タイトル
+ * @param {string} [rightTitle] 計算済みの比較先タイトル
+ * @returns {number} 並び順の比較結果
+ */
+function compareProjects(
+  left,
+  right,
+  leftOwner = left.owner.login.toLowerCase(),
+  rightOwner = right.owner.login.toLowerCase(),
+  leftTitle,
+  rightTitle,
+) {
+  if (leftOwner !== rightOwner) {
+    return leftOwner < rightOwner ? -1 : 1;
+  }
+  const leftFoldedTitle = leftTitle ?? left.title.toLowerCase();
+  const rightFoldedTitle = rightTitle ?? right.title.toLowerCase();
+  if (leftFoldedTitle !== rightFoldedTitle) {
+    return leftFoldedTitle < rightFoldedTitle ? -1 : 1;
+  }
+  return left.number - right.number;
+}
+
+/**
  * 2つのセマンティックバージョンを比較する。
  *
  * @param {SemanticVersion} current 比較元
@@ -1112,41 +1195,64 @@ function versionLessThan(current, other) {
 }
 
 /**
- * 改行区切りJSONを容量確定済み文字列から解析する。
+ * 改行区切りJSONを容量確定済み文字列から1行ずつ解析する。
  *
  * @param {Buffer | string} output JSON出力
- * @returns {unknown[]} 解析済み値
+ * @returns {Generator<unknown>} 解析済み値の反復子
  * @throws {Error} JSONが不正な場合
  */
-function parseJSONLines(output) {
+function* parseJSONLines(output) {
   const text = output.toString().trim();
   if (text === "") {
-    return [];
+    return;
   }
-  return text.split("\n").map((line) => JSON.parse(line));
+  let start = 0;
+  while (start < text.length) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    yield JSON.parse(text.slice(start, end));
+    start = end + 1;
+  }
 }
 
 /**
  * API項目の検証可能なアバターURLから数値所有者IDを補完する。
  *
  * @param {unknown} candidate リポジトリまたはProject候補
+ * @param {Map<string, number | null>} ownerIDs 応答内だけで再利用するURL別所有者ID
  * @returns {unknown} 所有者IDを補完した候補
  */
-function withDerivedOwnerID(candidate) {
+function withDerivedOwnerID(candidate, ownerIDs) {
   if (!isRecord(candidate) || !isRecord(candidate.owner)) {
     return candidate;
   }
 
   const owner = { ...candidate.owner };
   if (!Number.isSafeInteger(owner.id) || owner.id <= 0) {
-    const ownerID = avatarOwnerIDFromURL(
-      typeof owner.avatar_url === "string" ? owner.avatar_url : "",
-    );
+    const avatarURL = typeof owner.avatar_url === "string" ? owner.avatar_url : "";
+    if (!ownerIDs.has(avatarURL)) {
+      ownerIDs.set(avatarURL, avatarOwnerIDFromURL(avatarURL));
+    }
+    const ownerID = ownerIDs.get(avatarURL);
     if (ownerID !== null) {
       owner.id = ownerID;
     }
   }
   return { ...candidate, owner };
+}
+
+/**
+ * 解析済みアバターURLの配信先と所有者IDを検証する。
+ *
+ * @param {URL} parsedURL 解析済みURL
+ * @returns {number | null} 検証済み所有者ID
+ */
+function avatarOwnerIDFromParsedURL(parsedURL) {
+  if (!isAllowedAvatarURL(parsedURL)) {
+    return null;
+  }
+  const ownerID = Number(parsedURL.pathname.slice(3));
+  return Number.isSafeInteger(ownerID) && ownerID > 0 ? ownerID : null;
 }
 
 /**

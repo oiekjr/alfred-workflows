@@ -47,8 +47,7 @@ export function currentUserHomeDirectory() {
     throw new Error("home directory is outside /Users");
   }
 
-  validateSecureDirectory(homeDirectory);
-  const information = lstatBigInt(homeDirectory);
+  const information = validateSecureDirectory(homeDirectory);
   if (information.uid !== BigInt(userID)) {
     throw new Error("home directory owner does not match process owner");
   }
@@ -102,8 +101,7 @@ export function expectedAlfredCacheRoot() {
  * @throws {Error} 信頼条件を満たさない場合
  */
 export function validateSecureDirectory(targetPath) {
-  validateSecurePathComponents(targetPath);
-  const information = lstatBigInt(targetPath);
+  const information = validatedPathInformation(targetPath);
   if (!information.isDirectory()) {
     throw new Error("path is not a directory");
   }
@@ -138,8 +136,7 @@ export function validatePrivateDirectory(targetPath) {
  * @throws {Error} 信頼条件を満たさない場合
  */
 export function validatePrivateRegularFile(targetPath) {
-  validateSecurePathComponents(targetPath);
-  const information = lstatBigInt(targetPath);
+  const information = validatedPathInformation(targetPath);
   if (!information.isFile()) {
     throw new Error("path is not a regular file");
   }
@@ -161,26 +158,7 @@ export function validatePrivateRegularFile(targetPath) {
  * @throws {Error} symlink、所有者、権限が信頼条件を満たさない場合
  */
 export function validateSecurePathComponents(targetPath) {
-  const cleanPath = path.normalize(targetPath);
-  if (!path.isAbsolute(cleanPath)) {
-    throw new Error("path is not absolute");
-  }
-
-  validateTrustedPathInformation(lstatBigInt(path.parse(cleanPath).root));
-  let currentPath = path.parse(cleanPath).root;
-  const components = cleanPath
-    .slice(currentPath.length)
-    .split(path.sep)
-    .filter(Boolean);
-
-  for (let index = 0; index < components.length; index += 1) {
-    currentPath = path.join(currentPath, components[index]);
-    const information = lstatBigInt(currentPath);
-    validateTrustedPathInformation(information);
-    if (index < components.length - 1 && !information.isDirectory()) {
-      throw new Error(`path component is not a directory: ${currentPath}`);
-    }
-  }
+  validatedPathInformation(targetPath);
 }
 
 /**
@@ -400,6 +378,38 @@ export function isFileSystemError(error, code) {
 }
 
 /**
+ * 全パス要素を検証し、同時に取得した末尾要素の情報を返す。
+ *
+ * @param {string} targetPath 検証対象パス
+ * @returns {import("node:fs").BigIntStats} 検証済み末尾要素の情報
+ * @throws {Error} symlink、所有者、権限が信頼条件を満たさない場合
+ */
+function validatedPathInformation(targetPath) {
+  const cleanPath = path.normalize(targetPath);
+  if (!path.isAbsolute(cleanPath)) {
+    throw new Error("path is not absolute");
+  }
+
+  let information = lstatBigInt(path.parse(cleanPath).root);
+  validateTrustedPathInformation(information);
+  let currentPath = path.parse(cleanPath).root;
+  const components = cleanPath
+    .slice(currentPath.length)
+    .split(path.sep)
+    .filter(Boolean);
+
+  for (let index = 0; index < components.length; index += 1) {
+    currentPath = path.join(currentPath, components[index]);
+    information = lstatBigInt(currentPath);
+    validateTrustedPathInformation(information);
+    if (index < components.length - 1 && !information.isDirectory()) {
+      throw new Error(`path component is not a directory: ${currentPath}`);
+    }
+  }
+  return information;
+}
+
+/**
  * 現在プロセスの実UIDを取得する。
  *
  * @returns {number} 実UID
@@ -466,9 +476,10 @@ function sameFile(left, right) {
 function readBoundedDescriptor(descriptor, maximumBytes) {
   const chunks = [];
   let totalBytes = 0;
-  const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, maximumBytes + 1));
-
   while (true) {
+    const buffer = Buffer.allocUnsafe(
+      Math.min(64 * 1024, maximumBytes - totalBytes + 1),
+    );
     const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
     if (bytesRead === 0) {
       break;
@@ -477,7 +488,7 @@ function readBoundedDescriptor(descriptor, maximumBytes) {
     if (totalBytes > maximumBytes) {
       throw new Error("private file exceeds size limit");
     }
-    chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    chunks.push(buffer.subarray(0, bytesRead));
   }
 
   return Buffer.concat(chunks, totalBytes);

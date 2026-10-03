@@ -147,8 +147,9 @@ export class AvatarCache {
         if (normalizedAvatarURL(owner.avatar_url, owner.id) === null) {
           throw new Error("avatar owner does not match GitHub owner");
         }
-        if (downloadOwners.length < MAXIMUM_AVATAR_DOWNLOADS_PER_RUN) {
-          downloadOwners.push(owner);
+        downloadOwners.push(owner);
+        if (downloadOwners.length === MAXIMUM_AVATAR_DOWNLOADS_PER_RUN) {
+          break;
         }
       } catch {
         // 不正な外部URLは通信対象へ含めない
@@ -414,7 +415,7 @@ function requestAvatar(avatarURL, ownerID, redirectCount, signal) {
             response.destroy(new Error("avatar exceeds size limit"));
             return;
           }
-          chunks.push(Buffer.from(chunk));
+          chunks.push(chunk);
         });
         response.once("error", reject);
         response.once("end", () => resolve(Buffer.concat(chunks, bytes)));

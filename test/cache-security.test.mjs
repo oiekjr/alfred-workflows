@@ -15,6 +15,8 @@ import {
   ensureSecureCacheSubdirectory,
   readPrivateFile,
   validatePrivateRegularFile,
+  validateSecureDirectory,
+  validateSecurePathComponents,
   writePrivateDataAtomically,
 } from "../workflows/github-repositories/src/security.mjs";
 import {
@@ -117,6 +119,40 @@ test("private file validation rejects symlinks and shared permissions", (context
   assert.throws(() => validatePrivateRegularFile(sourcePath));
 });
 
+test("path validation still rejects symbolic-link ancestors", (context) => {
+  const root = managedTemporaryDirectory(context);
+  const directory = path.join(root, "real");
+  mkdirSync(directory, { mode: 0o700 });
+  writeFileSync(path.join(directory, "value"), "data", { mode: 0o600 });
+  const link = path.join(root, "link");
+  symlinkSync(directory, link);
+
+  assert.throws(() => validatePrivateRegularFile(path.join(link, "value")), /symbolic links/u);
+  assert.throws(() => validateSecureDirectory(link), /symbolic links/u);
+});
+
+test("path validation still rejects writable ancestors", (context) => {
+  const root = managedTemporaryDirectory(context);
+  const directory = path.join(root, "shared");
+  mkdirSync(directory, { mode: 0o700 });
+  writeFileSync(path.join(directory, "value"), "data", { mode: 0o600 });
+  chmodSync(directory, 0o770);
+
+  assert.throws(() => validatePrivateRegularFile(path.join(directory, "value")), /write permission/u);
+});
+
+test("path validation preserves regular-file and directory distinctions", (context) => {
+  const root = managedTemporaryDirectory(context);
+  const target = path.join(root, "value");
+  writeFileSync(target, "data", { mode: 0o600 });
+
+  assert.equal(validateSecureDirectory(root).isDirectory(), true);
+  assert.equal(validatePrivateRegularFile(target).isFile(), true);
+  assert.throws(() => validateSecureDirectory(target), /not a directory/u);
+  assert.throws(() => validatePrivateRegularFile(root), /not a regular file/u);
+  assert.equal(validateSecurePathComponents(target), undefined);
+});
+
 test("private reads enforce a hard byte limit", (context) => {
   const root = managedTemporaryDirectory(context);
   const targetPath = path.join(root, "large");
@@ -124,6 +160,42 @@ test("private reads enforce a hard byte limit", (context) => {
 
   assert.throws(() => readPrivateFile(targetPath, 5), /size limit/u);
   assert.equal(readFileSync(targetPath, "utf8"), "123456");
+});
+
+for (const bytes of [65_535, 65_536, 65_537]) {
+  test(`private reads retain exactly ${bytes} bytes across chunks`, (context) => {
+    const root = managedTemporaryDirectory(context);
+    const target = path.join(root, "value");
+    const data = Buffer.alloc(bytes, 0x61);
+    writeFileSync(target, data, { mode: 0o600 });
+
+    const result = readPrivateFile(target, 128 * 1024);
+
+    assert.deepEqual(result, data);
+  });
+}
+
+for (const bytes of [4, 5, 6]) {
+  test(`private reads enforce a five-byte limit for ${bytes} bytes`, (context) => {
+    const root = managedTemporaryDirectory(context);
+    const target = path.join(root, "value");
+    const data = Buffer.alloc(bytes, 0x61);
+    writeFileSync(target, data, { mode: 0o600 });
+
+    if (bytes > 5) {
+      assert.throws(() => readPrivateFile(target, 5), /size limit/u);
+    } else {
+      assert.deepEqual(readPrivateFile(target, 5), data);
+    }
+  });
+}
+
+test("private reads accept empty files with a zero-byte limit", (context) => {
+  const root = managedTemporaryDirectory(context);
+  const target = path.join(root, "empty");
+  writeFileSync(target, Buffer.alloc(0), { mode: 0o600 });
+
+  assert.deepEqual(readPrivateFile(target, 0), Buffer.alloc(0));
 });
 
 test("cache invalidation ignores unavailable relative roots", () => {

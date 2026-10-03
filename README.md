@@ -53,6 +53,33 @@ mise run check
 
 GitHub Actions runs the same task for pull requests and pushes to `main`.
 
+## Measure GitHub Navigator performance
+
+Run the offline benchmark with the pinned Node.js version:
+
+```sh
+mise exec -- node scripts/benchmark.mjs
+```
+
+It reports median timings after warmup for 5,000 repositories and Projects,
+cached Alfred responses, avatar lookups and refresh selection, and private file
+reads. It uses synthetic data and temporary private files; it does not contact
+GitHub or read your GitHub CLI configuration. Avatar refresh timings measure
+selection only, excluding downloads and writes.
+Two additional cases measure sorted and unsorted lists of 1,000 Projects with
+distinct owners and long Unicode titles.
+
+To compare the current code with a source snapshot from another revision,
+pass that snapshot's repository root:
+
+```sh
+mise exec -- node scripts/benchmark.mjs --compare /path/to/source-snapshot
+```
+
+The comparison alternates both versions within one process. Compare repeated
+runs on the same machine. These timings exclude Alfred and network latency and
+are measurements, not test thresholds.
+
 ## Build a workflow
 
 Build the validated source distribution tree:
