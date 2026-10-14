@@ -11,14 +11,19 @@ for candidate in /opt/homebrew/bin/node /usr/local/bin/node /opt/local/bin/node;
 done
 
 if [ -z "$node_path" ]; then
-  /usr/bin/printf '%s' '{"items":[{"title":"Install Node.js 22 or later","subtitle":"Node.js is required to run GitHub Navigator.","arg":"https://nodejs.org/en/download","quicklookurl":"https://nodejs.org/en/download","valid":true,"variables":{"action":"open"}}]}'
+  /usr/bin/printf '%s' '{"variables":{"github_navigator_reload_pending":""},"items":[{"title":"Install Node.js 22 or later","subtitle":"Node.js is required to run GitHub Navigator.","arg":"https://nodejs.org/en/download","quicklookurl":"https://nodejs.org/en/download","valid":true,"variables":{"action":"open"}}]}'
   exit 0
 fi
 
 workflow_cache=${alfred_workflow_cache-}
+reload_pending=""
+if [ "${github_navigator_reload_pending-}" = "1" ]; then
+  reload_pending=1
+fi
 exec /usr/bin/env -i \
   HOME="${HOME-}" \
   PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
   LC_ALL=C \
   alfred_workflow_cache="$workflow_cache" \
+  github_navigator_reload_pending="$reload_pending" \
   "$node_path" "$workflow_directory/src/bootstrap.cjs" "$@"

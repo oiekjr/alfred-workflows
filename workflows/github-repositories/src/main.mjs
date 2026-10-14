@@ -9,6 +9,7 @@ import {
 } from "./avatar.mjs";
 import { invalidateListCache } from "./cache.mjs";
 import { ExecRunner } from "./command.mjs";
+import { routeInput } from "./domain.mjs";
 
 const AUTHENTICATION_HELPER_MARKER = "--authentication-helper";
 const AUTHENTICATION_ACTIONS = new Set([
@@ -17,6 +18,7 @@ const AUTHENTICATION_ACTIONS = new Set([
   "authorize-projects",
 ]);
 const FALLBACK_OUTPUT = JSON.stringify({
+  variables: { github_navigator_reload_pending: "" },
   items: [
     {
       title: "Unable to load GitHub results",
@@ -77,7 +79,11 @@ export async function runMain(arguments_) {
       launcherPath,
       newEnvironmentAvatarCache(),
     );
-    const feed = await app.run(arguments_[0] ?? "");
+    const feed = await runSearch(
+      arguments_[0] ?? "",
+      process.env.github_navigator_reload_pending === "1",
+      app,
+    );
     writeFeed(feed);
 
     if (feed.avatarRefreshNeeded === true) {
@@ -92,6 +98,34 @@ export async function runMain(arguments_) {
     process.stdout.write(FALLBACK_OUTPUT);
     return 1;
   }
+}
+
+/**
+ * 再読み込みの待機表示を先に返し、次のAlfred実行で一覧を取得する。
+ *
+ * @param {string} query Alfred検索語
+ * @param {boolean} reloadPending 同一セッションで待機表示を返した場合はtrue
+ * @param {{run: (query: string) => Promise<object>}} app 検索処理
+ * @returns {Promise<object>} 表示または検索結果
+ */
+export async function runSearch(query, reloadPending, app) {
+  if (routeInput(query).mode === "reload" && !reloadPending) {
+    return {
+      items: [{
+        title: "Reloading GitHub repositories…",
+        subtitle: "Please wait. The results will appear when reloading finishes.",
+        valid: false,
+      }],
+      rerun: 0.1,
+      variables: { github_navigator_reload_pending: "1" },
+    };
+  }
+
+  const feed = await app.run(query);
+  return {
+    ...feed,
+    variables: { github_navigator_reload_pending: "" },
+  };
 }
 
 /**
@@ -127,11 +161,15 @@ function currentLauncherPath() {
 /**
  * 内部制御属性を除外してAlfred Script Filter形式を出力する。
  *
- * @param {{items: object[]}} feed 内部応答
+ * @param {{items: object[], rerun?: number, variables?: Record<string, string>}} feed 内部応答
  * @returns {void}
  */
 function writeFeed(feed) {
-  process.stdout.write(JSON.stringify({ items: feed.items }));
+  process.stdout.write(JSON.stringify({
+    items: feed.items,
+    rerun: feed.rerun,
+    variables: feed.variables,
+  }));
 }
 
 const directInvocation =

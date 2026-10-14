@@ -2,6 +2,7 @@
 
 const MINIMUM_NODE_MAJOR_VERSION = 22;
 const INSTALL_OUTPUT = JSON.stringify({
+  variables: { github_navigator_reload_pending: "" },
   items: [
     {
       title: "Install Node.js 22 or later",
@@ -14,6 +15,7 @@ const INSTALL_OUTPUT = JSON.stringify({
   ],
 });
 const FAILURE_OUTPUT = JSON.stringify({
+  variables: { github_navigator_reload_pending: "" },
   items: [
     {
       title: "Unable to load GitHub results",

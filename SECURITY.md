@@ -10,6 +10,7 @@ A malicious process running as the same macOS user can modify the workflow, Node
 
 - The workflow searches only fixed, standard locations for `gh`. It opens the executable with `O_NOFOLLOW`, verifies ownership and permissions, and copies the verified executable into a private cache that other accounts cannot modify.
 - The packaged `github-repositories` file is non-executable shell source passed explicitly to `/bin/sh`. It resolves Node.js 22 or later only from fixed Homebrew, MacPorts, and `/usr/local` locations, then launches packaged `.mjs` source with a newly constructed minimal environment.
+- The launcher accepts only the literal `1` for the non-secret `github_navigator_reload_pending` session flag. This lets Alfred display a loading row before reloading; it does not change API arguments, account checks, cache validation, or GitHub CLI's restricted environment.
 - GitHub CLI runs without the parent environment. Only required values such as `HOME`, `PATH`, pager settings, and browser settings are set explicitly.
 - Terminal authentication actions use a verified absolute launcher-source path instead of a relative path. The path is Base64-encoded for safe transport to a fixed `/bin/sh` Terminal command.
 - Projects integration requests only `read:project` and does not request Projects write access.

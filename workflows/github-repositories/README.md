@@ -87,7 +87,7 @@ Organization Projects use the Organization avatar, and personal Projects use the
 
 ## Reload repository and Project lists
 
-Type the exact command `gh reload` to clear both list caches and immediately retrieve the repository list again. The refreshed repositories appear as search results. The Project list is retrieved the next time you use `gh project` or `gh projects`.
+Type the exact command `gh reload` to clear both list caches and retrieve the repository list again. Alfred first shows `Reloading GitHub repositories…` while the request is running, then replaces it with the refreshed results or an error. The loading row cannot be selected. The Project list is retrieved the next time you use `gh project` or `gh projects`.
 
 List caches normally remain valid for 24 hours after retrieval; searching does not extend this period. Use `gh reload` to see changes sooner. Avatar caches keep their seven-day refresh period.
 

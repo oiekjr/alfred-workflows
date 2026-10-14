@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { App } from "../workflows/github-repositories/src/app.mjs";
 import { ListCache } from "../workflows/github-repositories/src/cache.mjs";
+import { runSearch } from "../workflows/github-repositories/src/main.mjs";
 import {
   managedTemporaryDirectory,
   successfulCommandResult,
@@ -275,7 +276,14 @@ test("reload clears both persisted lists, fetches repositories and preserves ava
   ]);
   const app = createApp(runner, lists, config);
 
-  const result = await app.run("reload");
+  const loading = await runSearch("reload", false, app);
+
+  assert.equal(loading.items[0].valid, false);
+  assert.equal(runner.findCalls, 0);
+  assert.equal(lists.loadRepositories(config)?.[0].full_name, "owner/repository");
+  assert.equal(lists.loadProjects(config)?.[0].title, "Roadmap");
+
+  const result = await runSearch("reload", true, app);
   const subsequent = await app.run("fresh");
 
   assert.equal(result.items[0].title, "owner/fresh");
