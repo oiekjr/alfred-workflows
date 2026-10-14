@@ -156,7 +156,7 @@ export const PROJECT_JQ_EXPRESSION = `.data.viewer as $viewer |
 }`;
 
 /**
- * 利用者入力を固定リンク、Project検索、リポジトリ検索へ分類する。
+ * 利用者入力を固定リンク、再読み込み、Project検索、リポジトリ検索へ分類する。
  *
  * @param {string} query Alfred検索語
  * @returns {RoutedInput} 分類結果
@@ -168,6 +168,9 @@ export function routeInput(query) {
   }
   if (/^prs?$/iu.test(normalizedQuery)) {
     return { mode: "pull_requests", query: "" };
+  }
+  if (/^reload$/iu.test(normalizedQuery)) {
+    return { mode: "reload", query: "" };
   }
 
   const match = normalizedQuery.match(/^(\S+)(?:\s+(.*))?$/u);
@@ -1274,7 +1277,7 @@ function isRecord(value) {
 
 /**
  * @typedef {object} RoutedInput
- * @property {"repositories" | "issues" | "pull_requests" | "projects"} mode 入力種別
+ * @property {"repositories" | "issues" | "pull_requests" | "projects" | "reload"} mode 入力種別
  * @property {string} query ローカル検索語
  */
 

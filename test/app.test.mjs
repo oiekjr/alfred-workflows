@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import { App } from "../workflows/github-repositories/src/app.mjs";
+import { ListCache } from "../workflows/github-repositories/src/cache.mjs";
 import {
+  managedTemporaryDirectory,
   successfulCommandResult,
+  testAccountIdentity,
   testConfigIdentity,
   testProject,
   testRepository,
@@ -145,7 +150,7 @@ class FakeLists {
  * テスト用Appを依存注入して生成する。
  *
  * @param {FakeRunner} runner コマンド実行境界
- * @param {FakeLists | null} [lists=null] 一覧キャッシュ
+ * @param {FakeLists | ListCache | null} [lists=null] 一覧キャッシュ
  * @param {object | null} [config=testConfigIdentity()] 設定同一性
  * @returns {App} テスト対象
  */
@@ -248,6 +253,92 @@ test("repository fetch is cached and subsequent typing filters locally", async (
     runner.commands.some((command) => command.args[0] === "auth"),
     false,
   );
+});
+
+test("reload clears both persisted lists, fetches repositories and preserves avatars", async (context) => {
+  const root = managedTemporaryDirectory(context);
+  const config = testConfigIdentity();
+  const lists = new ListCache(root);
+  lists.storeRepositories(testAccountIdentity(config), [testRepository()]);
+  lists.storeProjects(testAccountIdentity(config), [testProject()]);
+  const avatarDirectory = path.join(root, "avatars");
+  mkdirSync(avatarDirectory, { mode: 0o700 });
+  const avatarPath = path.join(avatarDirectory, "10.png");
+  writeFileSync(avatarPath, "cached avatar", { mode: 0o600 });
+  const fresh = testRepository({
+    full_name: "owner/fresh",
+    html_url: "https://github.com/owner/fresh",
+  });
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    successfulCommandResult(repositoryPageOutput([fresh])),
+  ]);
+  const app = createApp(runner, lists, config);
+
+  const result = await app.run("reload");
+  const subsequent = await app.run("fresh");
+
+  assert.equal(result.items[0].title, "owner/fresh");
+  assert.equal(subsequent.items[0].title, "owner/fresh");
+  assert.equal(lists.loadRepositories(config)?.[0].full_name, "owner/fresh");
+  assert.equal(lists.loadProjects(config), null);
+  assert.equal(readFileSync(avatarPath, "utf8"), "cached avatar");
+  assert.equal(runner.commands.length, 2);
+  assert.equal(runner.commands[1].args.includes("graphql"), true);
+});
+
+test("Project search after reload fetches its list on demand", async () => {
+  const lists = new FakeLists();
+  lists.repositories = [testRepository()];
+  lists.projects = [testProject({ title: "Old project" })];
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    successfulCommandResult(repositoryPageOutput([testRepository()])),
+    successfulCommandResult("gh version 2.60.0"),
+    successfulCommandResult(AUTHENTICATION_OUTPUT),
+    successfulCommandResult(JSON.stringify(testProject())),
+  ]);
+  const app = createApp(runner, lists);
+  await app.run("reload");
+
+  const result = await app.run("project");
+
+  assert.equal(result.items[0].title, "example-org / Roadmap");
+  assert.equal(lists.projects?.[0].title, "Roadmap");
+  assert.equal(runner.commands.length, 5);
+  assert.equal(runner.commands[4].args.includes("graphql"), true);
+});
+
+test("reload reports cache deletion failure without reusing old lists", async () => {
+  const lists = new FakeLists();
+  lists.repositories = [testRepository()];
+  lists.invalidate = () => { throw new Error("permission denied"); };
+  const runner = new FakeRunner([]);
+
+  const result = await createApp(runner, lists).run("reload");
+
+  assert.equal(result.items[0].title, "Unable to clear GitHub list cache");
+  assert.equal(result.items[0].valid, false);
+  assert.equal(runner.findCalls, 0);
+});
+
+test("reload does not restore cleared lists when repository retrieval fails", async () => {
+  const lists = new FakeLists();
+  lists.repositories = [testRepository()];
+  lists.projects = [testProject()];
+  const failure = successfulCommandResult();
+  failure.timedOut = true;
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    failure,
+  ]);
+
+  const result = await createApp(runner, lists).run("reload");
+
+  assert.equal(result.items[0].title, "Unable to load repositories");
+  assert.equal(result.items[0].valid, false);
+  assert.equal(lists.repositories, null);
+  assert.equal(lists.projects, null);
 });
 
 test("invalid repository API output is never cached or selectable", async () => {

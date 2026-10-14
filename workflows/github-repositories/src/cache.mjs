@@ -20,7 +20,7 @@ import {
   writePrivateDataAtomically,
 } from "./security.mjs";
 
-const LIST_CACHE_LIFETIME_MILLISECONDS = 30 * 60 * 1000;
+const LIST_CACHE_LIFETIME_MILLISECONDS = 24 * 60 * 60 * 1000;
 const LIST_CACHE_DIRECTORY = "lists";
 const LIST_CACHE_SCHEMA_VERSION = 3;
 const REPOSITORY_LIST_CACHE_NAME = "repositories.json";

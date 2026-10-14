@@ -58,24 +58,43 @@ test("project cache stores only normalized open projects", (context) => {
   );
 });
 
-test("cache remains valid for 30 minutes and is then invalidated", (context) => {
-  const root = managedTemporaryDirectory(context);
-  const config = testConfigIdentity();
-  let now = Date.now();
-  const cache = new ListCache(root, () => now);
-  cache.storeRepositories(testAccountIdentity(config), [testRepository()]);
-  now += 29 * 60 * 1000;
+for (const kind of ["repositories", "projects"]) {
+  for (const [ageMilliseconds, valid] of [
+    [86_399_999, true],
+    [86_400_000, true],
+    [86_400_001, false],
+  ]) {
+    test(`${kind} cache at age ${ageMilliseconds}ms is ${valid ? "valid" : "expired"}`, (context) => {
+      const root = managedTemporaryDirectory(context);
+      const config = testConfigIdentity();
+      let now = Date.now();
+      const cache = new ListCache(root, () => now);
+      if (kind === "repositories") {
+        cache.storeRepositories(testAccountIdentity(config), [testRepository()]);
+      } else {
+        cache.storeProjects(testAccountIdentity(config), [testProject()]);
+      }
+      const cachePath = path.join(root, "lists", `${kind}.json`);
+      const storedAt = Number(statSync(cachePath, { bigint: true }).mtimeNs / 1_000_000n);
+      now = storedAt + ageMilliseconds;
 
-  assert.equal(cache.loadRepositories(config)?.length, 1);
+      const loaded = kind === "repositories"
+        ? cache.loadRepositories(config)
+        : cache.loadProjects(config);
 
-  now += 2 * 60 * 1000;
-
-  assert.equal(cache.loadRepositories(config), null);
-  assert.throws(
-    () => lstatSync(path.join(root, "lists", "repositories.json")),
-    { code: "ENOENT" },
-  );
-});
+      if (valid) {
+        assert.equal(loaded?.length, 1);
+        assert.equal(
+          Number(statSync(cachePath, { bigint: true }).mtimeNs / 1_000_000n),
+          storedAt,
+        );
+      } else {
+        assert.equal(loaded, null);
+        assert.throws(() => lstatSync(cachePath), { code: "ENOENT" });
+      }
+    });
+  }
+}
 
 test("cache rejects unknown document fields and malformed entries", (context) => {
   const root = managedTemporaryDirectory(context);

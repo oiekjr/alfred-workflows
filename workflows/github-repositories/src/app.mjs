@@ -91,12 +91,24 @@ export class App {
       );
     }
 
+    const reload = input.mode === "reload";
+    if (reload && this.lists) {
+      try {
+        this.lists.invalidate();
+      } catch {
+        return failureFeed(
+          "Unable to clear GitHub list cache",
+          "Check the workflow cache permissions, then try gh reload again.",
+        );
+      }
+    }
+
     let configIdentity = this.currentGitHubConfigIdentity();
-    if (this.lists && configIdentity === null) {
+    if (!reload && this.lists && configIdentity === null) {
       safelyInvalidate(this.lists);
     }
 
-    if (this.lists && configIdentity !== null) {
+    if (!reload && this.lists && configIdentity !== null) {
       const cachedValues =
         input.mode === "projects"
           ? this.lists.loadProjects(configIdentity)
@@ -145,7 +157,7 @@ export class App {
       return installFeed("Update GitHub CLI");
     }
 
-    if (input.mode === "repositories") {
+    if (input.mode === "repositories" || reload) {
       return this.runRepositories(
         githubCLIPath,
         input.query,

@@ -85,6 +85,14 @@ Project results include open Projects owned by you or by an Organization you bel
 
 Organization Projects use the Organization avatar, and personal Projects use the user avatar.
 
+## Reload repository and Project lists
+
+Type the exact command `gh reload` to clear both list caches and immediately retrieve the repository list again. The refreshed repositories appear as search results. The Project list is retrieved the next time you use `gh project` or `gh projects`.
+
+List caches normally remain valid for 24 hours after retrieval; searching does not extend this period. Use `gh reload` to see changes sooner. Avatar caches keep their seven-day refresh period.
+
+Inputs such as `gh reload example` remain ordinary repository searches. If reloading fails, Alfred shows an error or the required sign-in action; cleared lists are not reused.
+
 ## Troubleshoot the workflow
 
 If the workflow reports that Node.js is missing or outdated:
@@ -109,7 +117,7 @@ GitHub Navigator 0.3.0 and later does not bundle a native Mach-O executable. Alf
 
 ## Review data handling
 
-After an authenticated `gh api` request succeeds, the workflow retrieves repository and Project lists with fixed GraphQL queries. It validates and normalizes the minimum required fields, then stores them in Alfred's private workflow cache for 30 minutes. Each list is bound to the GitHub.com hostname, active account login, and non-secret identity metadata for the standard GitHub CLI `hosts.yml` file. A changed account configuration, expiry, authentication action, or invalid cache format prevents the list from being reused.
+After an authenticated `gh api` request succeeds, the workflow retrieves repository and Project lists with fixed GraphQL queries. It validates and normalizes the minimum required fields, then stores them in Alfred's private workflow cache for 24 hours. Each list is bound to the GitHub.com hostname, active account login, and non-secret identity metadata for the standard GitHub CLI `hosts.yml` file. A changed account configuration, expiry, authentication action, `gh reload` command, or invalid cache format prevents the list from being reused.
 
 While the list cache is valid, the workflow does not launch `gh`; it filters the cached data locally in Node.js. The search text entered in Alfred is not stored in the cache.
 

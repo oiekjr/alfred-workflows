@@ -45,6 +45,18 @@ test("routeInput classifies exact fixed commands and project queries", () => {
   });
 });
 
+test("routeInput recognizes only the exact reload command", () => {
+  assert.deepEqual(routeInput(" ReLoAd "), { mode: "reload", query: "" });
+  assert.deepEqual(routeInput("reload example"), {
+    mode: "repositories",
+    query: "reload example",
+  });
+  assert.deepEqual(routeInput("reloading"), {
+    mode: "repositories",
+    query: "reloading",
+  });
+});
+
 test("GitHub CLI version parsing enforces the minimum version", () => {
   assert.deepEqual(parseGitHubCLIVersion("gh version 2.60.0 (date)"), {
     major: 2,
