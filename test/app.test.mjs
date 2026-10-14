@@ -256,6 +256,42 @@ test("repository fetch is cached and subsequent typing filters locally", async (
   );
 });
 
+test("the next invocation filters the persisted fetch with the latest input without another API call", async (context) => {
+  const root = managedTemporaryDirectory(context);
+  const config = testConfigIdentity();
+  const repositories = [
+    testRepository({
+      full_name: "owner/alpha",
+      html_url: "https://github.com/owner/alpha",
+    }),
+    testRepository({
+      id: 2,
+      full_name: "owner/other",
+      html_url: "https://github.com/owner/other",
+    }),
+  ];
+  const response = Promise.withResolvers();
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    response.promise,
+  ]);
+  const initialApp = createApp(runner, new ListCache(root), config);
+  let latestInput = "al";
+  const initialRequest = initialApp.run(latestInput);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runner.commands.filter((command) => command.args[0] === "api").length, 1);
+  latestInput = "OT";
+
+  response.resolve(successfulCommandResult(repositoryPageOutput(repositories)));
+  await initialRequest;
+  const nextApp = createApp(runner, new ListCache(root), config);
+  const result = await nextApp.run(latestInput);
+
+  assert.deepEqual(result.items.map((item) => item.title), ["owner/other"]);
+  assert.equal(runner.findCalls, 1);
+  assert.equal(runner.commands.filter((command) => command.args[0] === "api").length, 1);
+});
+
 test("reload clears both persisted lists, fetches repositories and preserves avatars", async (context) => {
   const root = managedTemporaryDirectory(context);
   const config = testConfigIdentity();

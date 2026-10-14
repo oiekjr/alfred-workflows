@@ -47,7 +47,7 @@ Authentication provided only through environment variables is not supported. A c
 2. Add one or more characters to filter by owner or repository name.
 3. Select a result to open its GitHub page in the default browser.
 
-Matching is case-insensitive and checks every position in the full `owner/repository` name. Filtering starts with the first character. The initial `gh` request starts immediately, while subsequent input is applied 300 milliseconds after the last character.
+Matching is case-insensitive and checks every position in the full `owner/repository` name. Filtering starts with the first character. The initial `gh` request starts immediately, while subsequent input is applied 100 milliseconds after the last character. If a request is already running, Alfred lets it finish, then runs the search with the latest input. While the list cache is valid, that search filters the saved list without another API request.
 
 Repository results include repositories that:
 
