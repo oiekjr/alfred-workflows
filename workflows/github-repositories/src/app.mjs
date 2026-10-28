@@ -103,12 +103,14 @@ export class App {
       }
     }
 
-    let configIdentity = this.currentGitHubConfigIdentity();
-    if (!reload && this.lists && configIdentity === null) {
+    let configIdentity = input.mode === "stars"
+      ? null
+      : this.currentGitHubConfigIdentity();
+    if (!reload && input.mode !== "stars" && this.lists && configIdentity === null) {
       safelyInvalidate(this.lists);
     }
 
-    if (!reload && this.lists && configIdentity !== null) {
+    if (!reload && input.mode !== "stars" && this.lists && configIdentity !== null) {
       const cachedValues =
         input.mode === "projects"
           ? this.lists.loadProjects(configIdentity)
@@ -172,7 +174,17 @@ export class App {
       return authenticationCheck.feed;
     }
     if (authenticationCheck.status === "signed_out") {
-      return projectLoginFeed(this.helperToken());
+      return input.mode === "stars"
+        ? loginFeed(this.helperToken())
+        : projectLoginFeed(this.helperToken());
+    }
+    if (input.mode === "stars") {
+      const login = authenticationCheck.authentication.login;
+      return fixedLinkFeed(
+        "GitHub Stars",
+        `Open ${login}'s starred repositories in the default browser.`,
+        `https://${GITHUB_HOSTNAME}/${login}?tab=stars`,
+      );
     }
 
     const cacheAccount = this.stableCacheAccount(

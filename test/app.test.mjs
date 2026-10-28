@@ -185,6 +185,94 @@ test("fixed links bypass GitHub CLI and config lookup", async () => {
   assert.equal(configCalls, 0);
 });
 
+test("stars opens the active account profile without list or Projects access", async () => {
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    successfulCommandResult(AUTHENTICATION_OUTPUT.replace(
+      "  - Token scopes: 'repo', 'read:project'",
+      "  - Token scopes: 'repo'",
+    )),
+  ]);
+  const lists = new FakeLists();
+  lists.repositories = [testRepository()];
+  const app = createApp(runner, lists);
+
+  const result = await app.run("stars");
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].title, "GitHub Stars");
+  assert.equal(result.items[0].arg, "https://github.com/owner?tab=stars");
+  assert.equal(result.items[0].quicklookurl, "https://github.com/owner?tab=stars");
+  assert.equal(result.items[0].valid, true);
+  assert.deepEqual(result.items[0].variables, { action: "open" });
+  assert.deepEqual(runner.commands.map((command) => command.args), [
+    ["--version"],
+    ["auth", "status", "--active", "--hostname", "github.com"],
+  ]);
+  assert.equal(lists.invalidations, 0);
+});
+
+test("stars follows an account switch instead of reusing a previous login", async () => {
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    successfulCommandResult(AUTHENTICATION_OUTPUT),
+    successfulCommandResult("gh version 2.60.0"),
+    successfulCommandResult(AUTHENTICATION_OUTPUT.replace("account owner ", "account next-owner ")),
+  ]);
+  const app = createApp(runner);
+
+  await app.run("stars");
+  const result = await app.run("star");
+
+  assert.equal(result.items[0].arg, "https://github.com/next-owner?tab=stars");
+});
+
+test("signed-out stars offers standard login without Projects authorization", async () => {
+  const signedOut = successfulCommandResult();
+  signedOut.error = new Error("not logged in");
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    signedOut,
+  ]);
+
+  const result = await createApp(runner).run("stars");
+
+  assert.equal(result.items[0].title, "Sign in to GitHub");
+  assert.deepEqual(result.items[0].variables, {
+    action: "login",
+    login_helper: "safe-token",
+  });
+});
+
+for (const output of ["unexpected", AUTHENTICATION_OUTPUT.replace("account owner ", "account evil/path ")]) {
+  test(`stars rejects invalid authentication output ${JSON.stringify(output)}`, async () => {
+    const runner = new FakeRunner([
+      successfulCommandResult("gh version 2.60.0"),
+      successfulCommandResult(output),
+    ]);
+
+    const result = await createApp(runner).run("stars");
+
+    assert.equal(result.items[0].title, "Unable to check GitHub authentication");
+    assert.equal(result.items[0].valid, false);
+    assert.equal(result.items[0].arg, undefined);
+  });
+}
+
+test("stars reports authentication timeout without opening a profile", async () => {
+  const timedOut = successfulCommandResult();
+  timedOut.timedOut = true;
+  const runner = new FakeRunner([
+    successfulCommandResult("gh version 2.60.0"),
+    timedOut,
+  ]);
+
+  const result = await createApp(runner).run("stars");
+
+  assert.equal(result.items[0].title, "Unable to check GitHub authentication");
+  assert.equal(result.items[0].valid, false);
+});
+
 test("missing and outdated GitHub CLI return install actions", async () => {
   const missing = await createApp(
     new FakeRunner([], new Error("not found")),

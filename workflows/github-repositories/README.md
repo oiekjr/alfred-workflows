@@ -1,6 +1,6 @@
 # GitHub Navigator
 
-Use GitHub Navigator to find repositories and Projects available to the active GitHub CLI account from Alfred. You can also open your personal GitHub Issues and Pull requests pages.
+Use GitHub Navigator to find repositories and Projects available to the active GitHub CLI account from Alfred. You can also open your personal GitHub Issues, Pull requests, and Stars pages.
 
 ## Check the requirements
 
@@ -67,6 +67,15 @@ Use an exact command to open GitHub's personal activity page:
 | `gh pr` or `gh prs` | [GitHub Pull requests](https://github.com/pulls) |
 
 These exact commands do not launch GitHub CLI or call an API. Inputs such as `gh issue example` continue through repository search instead of opening the fixed page.
+
+## Open your Stars tab
+
+1. Type `gh star` or `gh stars` in Alfred.
+2. Select `GitHub Stars` to open `https://github.com/USERNAME?tab=stars` in the default browser.
+
+The workflow checks GitHub CLI's active GitHub.com account to determine `USERNAME`. It does not fetch starred repositories or require additional permissions. If GitHub CLI is signed out, select `Sign in to GitHub` and complete authentication first.
+
+The destination follows the GitHub CLI account, which may differ from the account signed in through your browser. Inputs such as `gh stars example` remain repository searches.
 
 ## Find a Project
 

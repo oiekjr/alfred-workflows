@@ -6,7 +6,7 @@ Use this repository to install, build, and maintain independent workflows for [A
 
 | Workflow | Keyword | What it does |
 | --- | --- | --- |
-| [GitHub Navigator](workflows/github-repositories/README.md) | `gh` | Finds accessible GitHub repositories and Projects, and opens personal Issues and Pull requests pages |
+| [GitHub Navigator](workflows/github-repositories/README.md) | `gh` | Finds accessible GitHub repositories and Projects, and opens personal Issues, Pull requests, and Stars pages |
 
 Open the workflow-specific README for its usage, authentication, and additional requirements.
 

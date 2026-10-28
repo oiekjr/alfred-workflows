@@ -105,7 +105,7 @@
 	<key>createdby</key>
 	<string>oiekjr</string>
 	<key>description</key>
-	<string>Navigate GitHub repositories, projects, issues, and pull requests.</string>
+	<string>Navigate GitHub repositories, projects, issues, pull requests, and stars.</string>
 	<key>disabled</key>
 	<false/>
 	<key>name</key>
@@ -308,6 +308,7 @@
 • gh &lt;text&gt;: search accessible repositories
 • gh issue / gh issues: open GitHub Issues
 • gh pr / gh prs: open GitHub Pull requests
+• gh star / gh stars: open the active GitHub CLI account's profile Stars tab
 • gh project / gh projects [&lt;text&gt;]: list or search accessible open Projects
 
 Validated repository and Project lists are bound to the active GitHub account and cached privately for 30 minutes, so additional typing is filtered locally from the first query character. An account switch invalidates the matching list cache before use. The initial request runs immediately; later input waits 300 ms after the last character. Owner avatars are refreshed in the background and cached privately for seven days.

@@ -57,6 +57,19 @@ test("routeInput recognizes only the exact reload command", () => {
   });
 });
 
+test("routeInput reserves only the exact star and stars commands", () => {
+  assert.deepEqual(routeInput(" StArS "), { mode: "stars", query: "" });
+  assert.deepEqual(routeInput("star"), { mode: "stars", query: "" });
+  assert.deepEqual(routeInput("stars example"), {
+    mode: "repositories",
+    query: "stars example",
+  });
+  assert.deepEqual(routeInput("owner/stars"), {
+    mode: "repositories",
+    query: "owner/stars",
+  });
+});
+
 test("GitHub CLI version parsing enforces the minimum version", () => {
   assert.deepEqual(parseGitHubCLIVersion("gh version 2.60.0 (date)"), {
     major: 2,

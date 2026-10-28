@@ -169,6 +169,9 @@ export function routeInput(query) {
   if (/^prs?$/iu.test(normalizedQuery)) {
     return { mode: "pull_requests", query: "" };
   }
+  if (/^stars?$/iu.test(normalizedQuery)) {
+    return { mode: "stars", query: "" };
+  }
   if (/^reload$/iu.test(normalizedQuery)) {
     return { mode: "reload", query: "" };
   }
@@ -1277,7 +1280,7 @@ function isRecord(value) {
 
 /**
  * @typedef {object} RoutedInput
- * @property {"repositories" | "issues" | "pull_requests" | "projects" | "reload"} mode 入力種別
+ * @property {"repositories" | "issues" | "pull_requests" | "stars" | "projects" | "reload"} mode 入力種別
  * @property {string} query ローカル検索語
  */
 
