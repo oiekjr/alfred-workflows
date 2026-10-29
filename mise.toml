@@ -1,5 +1,5 @@
 [tools]
-node = "24.19.0"
+node = "24.22.1"
 
 [tasks.source-check]
 description = "Node.jsソースとAlfred定義を検査する"
